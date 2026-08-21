@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pengguna - Sistem Penggunaan Kenderaan</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- ===== AUTH SECTION ===== -->
+        <div id="authSection">
+            <div class="header">
+                <div class="logos-wrapper">
+                    <div class="logo-container">
+                        <div class="logo-badge">
+                            <img src="logo-jkr-sabah.png" alt="Logo JKR Sabah" class="main-logo">
+                        </div>
+                    </div>
+                    <div class="logo-divider"></div>
+                    <div class="logo-container csb-logo">
+                        <div class="logo-badge">
+                            <img src="CSB LOGO-512.png" alt="Logo CSB" class="main-logo">
+                        </div>
+                    </div>
+                </div>
+                <h1>Sistem Penggunaan Kenderaan</h1>
+                <p class="subtitle">Cawangan Senggara Bangunan</p>
+                <p class="org-name">Jabatan Kerja Raya Sabah</p>
+            </div>
+            
+            <a href="index.html" class="back-link">← Kembali</a>
+
+            <!-- Login / Register Tabs -->
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="showAuthTab('login')">🔐 Log Masuk</button>
+                <button class="auth-tab" onclick="showAuthTab('register')">📝 Daftar Akaun</button>
+            </div>
+
+            <!-- Login Form -->
+            <div id="loginTab" class="auth-content">
+                <div class="login-container">
+                    <div class="login-box">
+                        <h2>🔐 Log Masuk Pengguna</h2>
+                        <form id="userLoginForm">
+                            <div class="form-group">
+                                <label for="loginUsername">Nama Pengguna</label>
+                                <input type="text" id="loginUsername" placeholder="Masukkan nama pengguna" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="loginPassword">Kata Laluan</label>
+                                <input type="password" id="loginPassword" placeholder="Masukkan kata laluan" required>
+                            </div>
+                            <div id="loginError" class="error-message hidden"></div>
+                            <button type="submit" class="btn btn-primary btn-full">Log Masuk</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Register Form -->
+            <div id="registerTab" class="auth-content hidden">
+                <div class="form-container">
+                    <h2>📝 Daftar Akaun Baru</h2>
+                    <form id="userRegisterForm">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="regUsername">Nama Pengguna *</label>
+                                <input type="text" id="regUsername" placeholder="Min 3 aksara" required minlength="3">
+                            </div>
+                            <div class="form-group">
+                                <label for="regPassword">Kata Laluan *</label>
+                                <input type="password" id="regPassword" placeholder="Min 6 aksara" required minlength="6">
+                            </div>
+                            <div class="form-group">
+                                <label for="regNama">Nama Penuh *</label>
+                                <input type="text" id="regNama" placeholder="Masukkan nama penuh" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="regJawatan">Jawatan</label>
+                                <input type="text" id="regJawatan" placeholder="Contoh: Pegawai Senggara">
+                            </div>
+                            <div class="form-group">
+                                <label for="regNoHp">No. Telefon</label>
+                                <input type="tel" id="regNoHp" placeholder="Contoh: 0123456789">
+                            </div>
+                            <div class="form-group">
+                                <label for="regEmail">Emel</label>
+                                <input type="email" id="regEmail" placeholder="Contoh: nama@email.com">
+                            </div>
+                        </div>
+                        <div id="registerError" class="error-message hidden"></div>
+                        <div id="registerSuccess" class="success-message-mini hidden"></div>
+                        <button type="submit" class="btn btn-primary btn-full">📝 Daftar Akaun</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== USER DASHBOARD (hidden until logged in) ===== -->
+        <div id="userDashboard" class="hidden">
+            <div class="header">
+                <div class="logos-wrapper">
+                    <div class="logo-container">
+                        <div class="logo-badge">
+                            <img src="logo-jkr-sabah.png" alt="Logo JKR Sabah" class="main-logo">
+                        </div>
+                    </div>
+                    <div class="logo-divider"></div>
+                    <div class="logo-container csb-logo">
+                        <div class="logo-badge">
+                            <img src="CSB LOGO-512.png" alt="Logo CSB" class="main-logo">
+                        </div>
+                    </div>
+                </div>
+                <h1>Portal Pengguna</h1>
+                <p class="subtitle">Cawangan Senggara Bangunan</p>
+                <p class="org-name">Jabatan Kerja Raya Sabah</p>
+            </div>
+
+            <div class="admin-top-bar">
+                <a href="index.html" class="back-link">← Kembali</a>
+                <div class="admin-info">
+                    <span>👤 <span id="userName">Pengguna</span></span>
+                    <button class="btn btn-secondary btn-sm" onclick="userLogout()">🚪 Log Keluar</button>
+                </div>
+            </div>
+
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" onclick="showUserTab('requests')">📋 Permohonan Saya</button>
+                <button class="tab-btn" onclick="showUserTab('newRequest')">📤 Pohon Baru</button>
+            </div>
+
+            <!-- My Requests Tab -->
+            <div id="myRequestsTab" class="tab-content">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <div class="stat-number" id="userTotalRequests">0</div>
+                        <div class="stat-label">Jumlah Permohonan</div>
+                    </div>
+                    <div class="stat-card pending">
+                        <div class="stat-number" id="userPendingRequests">0</div>
+                        <div class="stat-label">Menunggu</div>
+                    </div>
+                    <div class="stat-card approved">
+                        <div class="stat-number" id="userApprovedRequests">0</div>
+                        <div class="stat-label">Diluluskan</div>
+                    </div>
+                    <div class="stat-card rejected">
+                        <div class="stat-number" id="userRejectedRequests">0</div>
+                        <div class="stat-label">Ditolak</div>
+                    </div>
+                </div>
+
+                <div id="userRequestsList" class="requests-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">📋</div>
+                        <p>Tiada permohonan lagi. Tekan "Pohon Baru" untuk membuat permohonan.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- New Request Tab -->
+            <div id="newRequestTab" class="tab-content hidden">
+                <div class="form-container">
+                    <form id="vehicleForm">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="nama">Nama Penuh *</label>
+                                <input type="text" id="nama" name="nama" placeholder="Masukkan nama penuh" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="jawatan">Jawatan *</label>
+                                <input type="text" id="jawatan" name="jawatan" placeholder="Contoh: Pegawai Senggara" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="noHp">No. Telefon Bimbit *</label>
+                                <input type="tel" id="noHp" name="noHp" placeholder="Contoh: 0123456789" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="email">Emel (untuk notifikasi)</label>
+                                <input type="email" id="email" name="email" placeholder="Contoh: nama@email.com">
+                                <small class="field-note">* Pilihan - untuk terima notifikasi kelulusan</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="noPlate">No. Plat Kenderaan *</label>
+                                <input type="text" id="noPlate" name="noPlate" placeholder="Contoh: ABC 1234" required>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="tujuan">Tujuan Penggunaan *</label>
+                                <textarea id="tujuan" name="tujuan" placeholder="Nyatakan tujuan penggunaan kenderaan..." rows="3" required></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label for="tarikhBertolak">Tarikh Bertolak *</label>
+                                <input type="date" id="tarikhBertolak" name="tarikhBertolak" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="tarikhKembali">Tarikh Kembali *</label>
+                                <input type="date" id="tarikhKembali" name="tarikhKembali" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="odoSebelum">Odo Meter Sebelum *</label>
+                                <input type="number" id="odoSebelum" name="odoSebelum" placeholder="Contoh: 50000" min="0" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="odoSelepas">Odo Meter Selepas</label>
+                                <input type="number" id="odoSelepas" name="odoSelepas" placeholder="Diisi selepas kembali" min="0">
+                                <small class="field-note">* Boleh diisi kemudian</small>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">📤 Hantar Permohonan</button>
+                            <button type="reset" class="btn btn-secondary">🗑️ Reset</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div id="successMessage" class="success-message hidden">
+                    <div class="success-icon">✅</div>
+                    <h3>Permohonan Berjaya Dihantar!</h3>
+                    <p>Tunggu kelulusan daripada admin.</p>
+                    <p class="notification-info">📧 Notifikasi akan dihantar ke emel dan nombor telefon anda.</p>
+                    <button onclick="resetUserForm()" class="btn btn-primary">Buat Permohonan Baru</button>
+                </div>
+            </div>
+
+            <div class="footer">
+                <p>© 2024 Sistem Penggunaan Kenderaan | Cawangan Senggara Bangunan</p>
+                <p class="footer-org">Jabatan Kerja Raya Sabah</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Modal -->
+    <div id="detailModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Butiran Permohonan</h3>
+                <button class="modal-close" onclick="closeUserModal()">✕</button>
+            </div>
+            <div class="modal-body" id="userModalBody"></div>
+            <div class="modal-footer" id="userModalFooter">
+                <button class="btn btn-secondary" onclick="closeUserModal()">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+    <script src="user-portal.js"></script>
+</body>
+</html>

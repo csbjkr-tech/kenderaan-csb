@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Sistem Penggunaan Kenderaan</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Login Section -->
+        <div id="loginSection">
+            <div class="header">
+                <div class="logos-wrapper">
+                    <div class="logo-container">
+                        <div class="logo-badge">
+                            <img src="logo-jkr-sabah.png" alt="Logo JKR Sabah" class="main-logo">
+                        </div>
+                    </div>
+                    <div class="logo-divider"></div>
+                    <div class="logo-container csb-logo">
+                        <div class="logo-badge">
+                            <img src="CSB LOGO-512.png" alt="Logo CSB" class="main-logo">
+                        </div>
+                    </div>
+                </div>
+                <h1>Panel Pentadbir</h1>
+                <p class="subtitle">Sistem Penggunaan Kenderaan - Senggara Bangunan</p>
+                <p class="org-name">Jabatan Kerja Raya Sabah</p>
+            </div>
+            
+            <a href="index.html" class="back-link">← Kembali</a>
+            
+            <div class="login-container">
+                <div class="login-box">
+                    <h2>🔐 Log Masuk Admin</h2>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="username">Nama Pengguna</label>
+                            <input type="text" id="username" placeholder="Masukkan nama pengguna" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Kata Laluan</label>
+                            <input type="password" id="password" placeholder="Masukkan kata laluan" required>
+                        </div>
+                        <div id="loginError" class="error-message hidden">Nama pengguna atau kata laluan salah!</div>
+                        <button type="submit" class="btn btn-primary btn-full">Log Masuk</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Admin Panel (hidden until logged in) -->
+        <div id="adminPanel" class="hidden">
+            <div class="header">
+                <div class="logos-wrapper">
+                    <div class="logo-container">
+                        <div class="logo-badge">
+                            <img src="logo-jkr-sabah.png" alt="Logo JKR Sabah" class="main-logo">
+                        </div>
+                    </div>
+                    <div class="logo-divider"></div>
+                    <div class="logo-container csb-logo">
+                        <div class="logo-badge">
+                            <img src="CSB LOGO-512.png" alt="Logo CSB" class="main-logo">
+                        </div>
+                    </div>
+                </div>
+                <h1>Panel Pentadbir</h1>
+                <p class="subtitle">Sistem Penggunaan Kenderaan - Senggara Bangunan</p>
+                <p class="org-name">Jabatan Kerja Raya Sabah</p>
+            </div>
+            
+            <div class="admin-top-bar">
+                <a href="index.html" class="back-link">← Kembali</a>
+                <div class="admin-info">
+                    <span>👤 <span id="adminName">Admin</span></span>
+                    <span class="session-timer" id="sessionTimer">⏱️ Sesi: 5:00</span>
+                    <span class="auto-refresh-timer" id="autoRefreshTimer">🔄 Auto-refresh: <span id="autoRefreshCountdown">60</span>s</span>
+                    <button class="btn btn-secondary btn-sm" onclick="refreshPage()">🔄 Refresh</button>
+                    <button class="btn btn-secondary btn-sm" onclick="showSettings()">⚙️ Tetapan</button>
+                    <button class="btn btn-secondary btn-sm" onclick="logout()">🚪 Log Keluar</button>
+                </div>
+            </div>
+            
+            <!-- Tab Navigation -->
+            <div class="tab-nav">
+                <button class="tab-btn active" onclick="showTab('requests')">📋 Permohonan</button>
+                <button class="tab-btn" onclick="showTab('users')">👥 Pengguna</button>
+                <button class="tab-btn" onclick="showTab('settings')">⚙️ Tetapan</button>
+            </div>
+            
+            <!-- Requests Tab -->
+            <div id="requestsTab" class="tab-content">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalRequests">0</div>
+                        <div class="stat-label">Jumlah Permohonan</div>
+                    </div>
+                    <div class="stat-card pending">
+                        <div class="stat-number" id="pendingRequests">0</div>
+                        <div class="stat-label">Menunggu Kelulusan</div>
+                    </div>
+                    <div class="stat-card approved">
+                        <div class="stat-number" id="approvedRequests">0</div>
+                        <div class="stat-label">Diluluskan</div>
+                    </div>
+                    <div class="stat-card rejected">
+                        <div class="stat-number" id="rejectedRequests">0</div>
+                        <div class="stat-label">Ditolak</div>
+                    </div>
+                </div>
+                
+                <div class="filter-bar">
+                    <label>Tapis Status:</label>
+                    <select id="filterStatus" onchange="filterRequests()">
+                        <option value="all">Semua</option>
+                        <option value="pending">Menunggu</option>
+                        <option value="approved">Diluluskan</option>
+                        <option value="rejected">Ditolak</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" onclick="exportData()">📥 Eksport Data</button>
+                </div>
+                
+                <div id="requestsList" class="requests-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">📋</div>
+                        <p>Tiada permohonan lagi.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Users Tab -->
+            <div id="usersTab" class="tab-content hidden">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalUsers">0</div>
+                        <div class="stat-label">Jumlah Pengguna</div>
+                    </div>
+                    <div class="stat-card approved">
+                        <div class="stat-number" id="activeUsers">0</div>
+                        <div class="stat-label">Aktif</div>
+                    </div>
+                    <div class="stat-card rejected">
+                        <div class="stat-number" id="inactiveUsers">0</div>
+                        <div class="stat-label">Dinyahaktif</div>
+                    </div>
+                </div>
+                
+                <div id="usersList" class="requests-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">👥</div>
+                        <p>Tiada pengguna lagi.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Settings Tab -->
+            <div id="settingsTab" class="tab-content hidden">
+                <div class="settings-container">
+                    <div class="settings-card">
+                        <h3>🔑 Tukar Kata Laluan</h3>
+                        <form id="changePasswordForm">
+                            <div class="form-group">
+                                <label for="currentPassword">Kata Laluan Semasa *</label>
+                                <input type="password" id="currentPassword" placeholder="Masukkan kata laluan semasa" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="newPassword">Kata Laluan Baru *</label>
+                                <input type="password" id="newPassword" placeholder="Masukkan kata laluan baru (min 6 aksara)" required minlength="6">
+                            </div>
+                            <div class="form-group">
+                                <label for="confirmPassword">Sahkan Kata Laluan Baru *</label>
+                                <input type="password" id="confirmPassword" placeholder="Masukkan semula kata laluan baru" required minlength="6">
+                            </div>
+                            <div id="passwordError" class="error-message hidden"></div>
+                            <div id="passwordSuccess" class="success-message-mini hidden"></div>
+                            <button type="submit" class="btn btn-primary">🔑 Tukar Kata Laluan</button>
+                        </form>
+                    </div>
+                    
+                    <div class="settings-card">
+                        <h3>🛡️ Keselamatan Akaun</h3>
+                        <div class="security-info">
+                            <div class="info-item">
+                                <span class="info-label">Status Kata Laluan:</span>
+                                <span id="passwordStatus" class="status-badge pending">Perlu ditukar</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Log Masuk Terakhir:</span>
+                                <span id="lastLogin">-</span>
+                            </div>
+                        </div>
+                        <div class="security-tips">
+                            <h4>💡 Tips Keselamatan:</h4>
+                            <ul>
+                                <li>Guna kata laluan yang kuat (campuran huruf, nombor, simbol)</li>
+                                <li>Jangan guna kata laluan yang sama untuk akaun lain</li>
+                                <li>Tukar kata laluan secara berkala</li>
+                                <li>Jangan kongsi kata laluan dengan orang lain</li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-card danger-zone">
+                        <h3>⚠️ Zon Bahaya</h3>
+                        <p className="danger-text">Tindakan di bawah tidak boleh diundur.</p>
+                        <div class="danger-actions">
+                            <button class="btn btn-danger btn-sm" onclick="resetAllData()">🗑️ Padam Semua Data Permohonan</button>
+                            <button class="btn btn-danger btn-sm" onclick="resetToDefault()">🔄 Reset Kata Laluan Lalai</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>© 2024 Sistem Penggunaan Kenderaan | Cawangan Senggara Bangunan</p>
+                <p class="footer-org">Jabatan Kerja Raya Sabah</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal for viewing details -->
+    <div id="detailModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Butiran Permohonan</h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Content loaded dynamically -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <!-- Action buttons loaded dynamically -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Inactivity Warning Modal -->
+    <div id="inactivityModal" class="modal hidden">
+        <div class="modal-content inactivity-modal">
+            <div class="modal-header warning">
+                <h3>⚠️ Amaran Sesi Tamat</h3>
+            </div>
+            <div class="modal-body">
+                <div class="inactivity-warning">
+                    <div class="warning-icon">⏰</div>
+                    <p>Sesi anda akan tamat dalam <strong id="countdownTimer">60</strong> saat</p>
+                    <p class="warning-subtext"> kerana tiada aktiviti yang dilakukan.</p>
+                </div>
+                <div class="inactivity-actions">
+                    <button class="btn btn-success" onclick="extendSession()">✅ Kekalkan Sesi</button>
+                    <button class="btn btn-danger" onclick="logout()">🚪 Log Keluar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
