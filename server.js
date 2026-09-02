@@ -31,9 +31,12 @@ app.use(express.static(__dirname));
 // ===== DATABASE SETUP (PostgreSQL) =====
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('railway')
-        ? { rejectUnauthorized: false }
-        : false
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+});
+
+// Log pool errors
+pool.on('error', (err) => {
+    console.error('❌ Unexpected PG pool error:', err.message);
 });
 
 // Helper: convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
@@ -959,6 +962,7 @@ async function startServer() {
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error.message);
+        console.error(error.stack);
         process.exit(1);
     }
 }
