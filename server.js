@@ -31,7 +31,9 @@ app.use(express.static(__dirname));
 // ===== DATABASE SETUP (PostgreSQL) =====
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+    ssl: (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1'))
+        ? { rejectUnauthorized: false }
+        : false
 });
 
 // Log pool errors
