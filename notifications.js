@@ -257,13 +257,11 @@ async function sendNotification(request, type, db) {
     // Save notification log to database
     if (db) {
         try {
-            const stmt = db.prepare(`
-                INSERT INTO notifications (request_id, type, recipient, status, error_message, created_at)
-                VALUES (?, ?, ?, ?, ?, datetime('now'))
-            `);
-            
             for (const notif of notifications) {
-                stmt.run(request.id, notif.type, notif.recipient, notif.status, notif.error);
+                await db.prepare(`
+                    INSERT INTO notifications (request_id, type, recipient, status, error_message, created_at)
+                    VALUES (?, ?, ?, ?, ?, NOW()::TEXT)
+                `).run(request.id, notif.type, notif.recipient, notif.status, notif.error);
             }
         } catch (error) {
             console.error('Error saving notification log:', error);

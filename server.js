@@ -1,5 +1,5 @@
 const express = require('express');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
@@ -15,7 +15,6 @@ function isDuplicate(key) {
     const last = recentRequests.get(key);
     if (last && (now - last) < 5000) return true;
     recentRequests.set(key, now);
-    // Clean old entries every 100 entries
     if (recentRequests.size > 100) {
         for (const [k, v] of recentRequests) {
             if (now - v > 10000) recentRequests.delete(k);
@@ -29,116 +28,154 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ===== DATABASE SETUP =====
-const db = new Database('vehicle_requests.db');
+// ===== DATABASE SETUP (PostgreSQL) =====
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('railway')
+        ? { rejectUnauthorized: false }
+        : false
+});
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-// Create tables
-db.exec(`
-    CREATE TABLE IF NOT EXISTS requests (
-        id TEXT PRIMARY KEY,
-        nama TEXT NOT NULL,
-        jawatan TEXT NOT NULL,
-        no_hp TEXT NOT NULL,
-        email TEXT,
-        no_plate TEXT NOT NULL,
-        tujuan TEXT NOT NULL,
-        tarikh_bertolak TEXT NOT NULL,
-        tarikh_kembali TEXT NOT NULL,
-        odo_sebelum INTEGER NOT NULL,
-        odo_selepas INTEGER,
-        status TEXT DEFAULT 'pending',
-        created_at TEXT NOT NULL,
-        approved_at TEXT,
-        rejected_at TEXT,
-        admin_notes TEXT DEFAULT ''
-    )
-`);
-
-db.exec(`
-    CREATE TABLE IF NOT EXISTS admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        nama TEXT NOT NULL,
-        password_changed_at TEXT DEFAULT NULL,
-        last_login_at TEXT DEFAULT NULL
-    )
-`);
-
-db.exec(`
-    CREATE TABLE IF NOT EXISTS notifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        request_id TEXT NOT NULL,
-        type TEXT NOT NULL,
-        recipient TEXT NOT NULL,
-        status TEXT NOT NULL,
-        error_message TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (request_id) REFERENCES requests(id)
-    )
-`);
-
-db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        nama TEXT NOT NULL,
-        jawatan TEXT DEFAULT '',
-        no_hp TEXT DEFAULT '',
-        email TEXT DEFAULT '',
-        is_active INTEGER DEFAULT 1,
-        created_at TEXT DEFAULT NULL,
-        last_login_at TEXT DEFAULT NULL
-    )
-`);
-
-// ===== MIGRATION: Add missing columns =====
-try {
-    // Admins table
-    const adminCols = db.prepare("PRAGMA table_info(admins)").all().map(c => c.name);
-    if (!adminCols.includes('password_changed_at')) {
-        db.exec("ALTER TABLE admins ADD COLUMN password_changed_at TEXT DEFAULT NULL");
-        console.log('✅ Added password_changed_at column to admins table');
-    }
-    if (!adminCols.includes('last_login_at')) {
-        db.exec("ALTER TABLE admins ADD COLUMN last_login_at TEXT DEFAULT NULL");
-        console.log('✅ Added last_login_at column to admins table');
-    }
-    // Requests table
-    const reqCols = db.prepare("PRAGMA table_info(requests)").all().map(c => c.name);
-    if (!reqCols.includes('email')) {
-        db.exec("ALTER TABLE requests ADD COLUMN email TEXT");
-        console.log('✅ Added email column to requests table');
-    }
-    if (!reqCols.includes('returned_at')) {
-        db.exec("ALTER TABLE requests ADD COLUMN returned_at TEXT DEFAULT NULL");
-        console.log('✅ Added returned_at column to requests table');
-    }
-} catch (error) {
-    console.warn('⚠️ Migration warning:', error.message);
+// Helper: convert SQLite ? placeholders to PostgreSQL $1, $2, etc.
+function toPG(sql) {
+    let i = 0;
+    return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-// Insert default admin if not exists
-const adminExists = db.prepare('SELECT COUNT(*) as count FROM admins').get();
-if (adminExists.count === 0) {
-    db.prepare('INSERT INTO admins (username, password, nama) VALUES (?, ?, ?)').run('admin', 'admin123', 'Administrator');
-}
-
-// Cleanup orphaned notifications (FK constraint safety)
-try {
-    const orphanCount = db.prepare(`
-        DELETE FROM notifications WHERE request_id NOT IN (SELECT id FROM requests)
-    `).run();
-    if (orphanCount.changes > 0) {
-        console.log(`🧹 Cleaned up ${orphanCount.changes} orphaned notification(s)`);
+// Compatibility wrapper so the rest of the code stays minimal
+const db = {
+    prepare(sql) {
+        const pgSql = toPG(sql);
+        const self = this;
+        return {
+            get(...params) {
+                return self._queryOne(pgSql, params);
+            },
+            all(...params) {
+                return self._queryAll(pgSql, params);
+            },
+            run(...params) {
+                return self._run(pgSql, params);
+            }
+        };
+    },
+    exec(sql) {
+        // For multi-statement exec (table creation), run each statement separately
+        const statements = sql.split(';').map(s => s.trim()).filter(s => s.length > 0);
+        return Promise.all(statements.map(s => pool.query(s)));
+    },
+    transaction(fn) {
+        return async (...args) => {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                // Temporarily override pool.query to use client for the transaction
+                const origQuery = pool.query.bind(pool);
+                pool.query = client.query.bind(client);
+                const result = fn(...args);
+                // If fn returns a promise, await it
+                if (result && typeof result.then === 'function') await result;
+                await client.query('COMMIT');
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                pool.query = origQuery;
+                client.release();
+            }
+        };
+    },
+    async _queryOne(sql, params) {
+        const result = await pool.query(sql, params);
+        return result.rows[0] || null;
+    },
+    async _queryAll(sql, params) {
+        const result = await pool.query(sql, params);
+        return result.rows;
+    },
+    async _run(sql, params) {
+        const result = await pool.query(sql, params);
+        return { changes: result.rowCount, lastInsertRowid: result.rows[0]?.id };
     }
-} catch (error) {
-    console.warn('⚠️ Cleanup warning:', error.message);
+};
+
+// ===== TABLE CREATION =====
+async function initDatabase() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS requests (
+            id TEXT PRIMARY KEY,
+            nama TEXT NOT NULL,
+            jawatan TEXT NOT NULL,
+            no_hp TEXT NOT NULL,
+            email TEXT,
+            no_plate TEXT NOT NULL,
+            tujuan TEXT NOT NULL,
+            tarikh_bertolak TEXT NOT NULL,
+            tarikh_kembali TEXT NOT NULL,
+            odo_sebelum INTEGER NOT NULL,
+            odo_selepas INTEGER,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            approved_at TEXT,
+            rejected_at TEXT,
+            admin_notes TEXT DEFAULT '',
+            returned_at TEXT
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS admins (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            nama TEXT NOT NULL,
+            password_changed_at TEXT DEFAULT NULL,
+            last_login_at TEXT DEFAULT NULL
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS notifications (
+            id SERIAL PRIMARY KEY,
+            request_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            recipient TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (request_id) REFERENCES requests(id)
+        )
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            nama TEXT NOT NULL,
+            jawatan TEXT DEFAULT '',
+            no_hp TEXT DEFAULT '',
+            email TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT NULL,
+            last_login_at TEXT DEFAULT NULL
+        )
+    `);
+
+    console.log('✅ Tables created/verified');
+
+    // Insert default admin if not exists
+    const adminResult = await pool.query('SELECT COUNT(*) as count FROM admins');
+    if (parseInt(adminResult.rows[0].count) === 0) {
+        await pool.query('INSERT INTO admins (username, password, nama) VALUES ($1, $2, $3)', ['admin', 'admin123', 'Administrator']);
+        console.log('✅ Default admin created');
+    }
+
+    // Cleanup orphaned notifications
+    const orphanResult = await pool.query('DELETE FROM notifications WHERE request_id NOT IN (SELECT id FROM requests)');
+    if (orphanResult.rowCount > 0) {
+        console.log(`🧹 Cleaned up ${orphanResult.rowCount} orphaned notification(s)`);
+    }
 }
 
 // ===== INITIALIZE NOTIFICATIONS =====
@@ -149,15 +186,15 @@ console.log('📱 SMS notifications:', notificationStatus.sms ? 'ENABLED' : 'DIS
 // ===== API ROUTES =====
 
 // Get all requests
-app.get('/api/requests', (req, res) => {
+app.get('/api/requests', async (req, res) => {
     try {
         const { status } = req.query;
         let requests;
         
         if (status && status !== 'all') {
-            requests = db.prepare('SELECT * FROM requests WHERE status = ? ORDER BY created_at DESC').all(status);
+            requests = await db.prepare('SELECT * FROM requests WHERE status = $1 ORDER BY created_at DESC').all(status);
         } else {
-            requests = db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
+            requests = await db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
         }
         
         res.json(requests);
@@ -167,9 +204,9 @@ app.get('/api/requests', (req, res) => {
 });
 
 // Get single request
-app.get('/api/requests/:id', (req, res) => {
+app.get('/api/requests/:id', async (req, res) => {
     try {
-        const request = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const request = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         
         if (!request) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
@@ -182,7 +219,7 @@ app.get('/api/requests/:id', (req, res) => {
 });
 
 // Create new request
-app.post('/api/requests', (req, res) => {
+app.post('/api/requests', async (req, res) => {
     try {
         const { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
         
@@ -200,14 +237,12 @@ app.post('/api/requests', (req, res) => {
             return res.status(429).json({ error: 'Permohonan sama telah dihantar. Sila tunggu sebentar.' });
         }
         
-        const stmt = db.prepare(`
+        await db.prepare(`
             INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
-        `);
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', NOW()::TEXT)
+        `).run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null);
         
-        stmt.run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null);
-        
-        const newRequest = db.prepare('SELECT * FROM requests WHERE id = ?').get(id);
+        const newRequest = await db.prepare('SELECT * FROM requests WHERE id = $1').get(id);
         res.status(201).json(newRequest);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -215,22 +250,20 @@ app.post('/api/requests', (req, res) => {
 });
 
 // Update request
-app.put('/api/requests/:id', (req, res) => {
+app.put('/api/requests/:id', async (req, res) => {
     try {
         const { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
         
-        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
         
-        const stmt = db.prepare(`
+        await db.prepare(`
             UPDATE requests 
-            SET nama = ?, jawatan = ?, no_hp = ?, email = ?, no_plate = ?, tujuan = ?, tarikh_bertolak = ?, tarikh_kembali = ?, odo_sebelum = ?, odo_selepas = ?
-            WHERE id = ?
-        `);
-        
-        stmt.run(
+            SET nama = $1, jawatan = $2, no_hp = $3, email = $4, no_plate = $5, tujuan = $6, tarikh_bertolak = $7, tarikh_kembali = $8, odo_sebelum = $9, odo_selepas = $10
+            WHERE id = $11
+        `).run(
             nama || existing.nama,
             jawatan || existing.jawatan,
             no_hp || existing.no_hp,
@@ -244,7 +277,7 @@ app.put('/api/requests/:id', (req, res) => {
             req.params.id
         );
         
-        const updated = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         res.json(updated);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -254,20 +287,18 @@ app.put('/api/requests/:id', (req, res) => {
 // Approve request
 app.put('/api/requests/:id/approve', async (req, res) => {
     try {
-        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
         
-        const stmt = db.prepare(`
+        await db.prepare(`
             UPDATE requests 
-            SET status = 'approved', approved_at = datetime('now')
-            WHERE id = ?
-        `);
+            SET status = 'approved', approved_at = NOW()::TEXT
+            WHERE id = $1
+        `).run(req.params.id);
         
-        stmt.run(req.params.id);
-        
-        const updated = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         
         // Send notifications
         try {
@@ -288,20 +319,18 @@ app.put('/api/requests/:id/reject', async (req, res) => {
     try {
         const { admin_notes } = req.body;
         
-        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
         
-        const stmt = db.prepare(`
+        await db.prepare(`
             UPDATE requests 
-            SET status = 'rejected', rejected_at = datetime('now'), admin_notes = ?
-            WHERE id = ?
-        `);
+            SET status = 'rejected', rejected_at = NOW()::TEXT, admin_notes = $1
+            WHERE id = $2
+        `).run(admin_notes || '', req.params.id);
         
-        stmt.run(admin_notes || '', req.params.id);
-        
-        const updated = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         
         // Send notifications
         try {
@@ -318,11 +347,11 @@ app.put('/api/requests/:id/reject', async (req, res) => {
 });
 
 // Return vehicle (user updates odo_selepas and marks as completed)
-app.put('/api/requests/:id/return', (req, res) => {
+app.put('/api/requests/:id/return', async (req, res) => {
     try {
         const { odo_selepas } = req.body;
 
-        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
@@ -335,11 +364,11 @@ app.put('/api/requests/:id/return', (req, res) => {
             return res.status(400).json({ error: 'Odo meter selepas mesti lebih besar daripada odo meter sebelum' });
         }
 
-        db.prepare(
-            `UPDATE requests SET odo_selepas = ?, status = 'completed', returned_at = datetime('now') WHERE id = ?`
+        await db.prepare(
+            `UPDATE requests SET odo_selepas = $1, status = 'completed', returned_at = NOW()::TEXT WHERE id = $2`
         ).run(odo_selepas, req.params.id);
 
-        const updated = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         res.json(updated);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -347,19 +376,27 @@ app.put('/api/requests/:id/return', (req, res) => {
 });
 
 // Delete request (use transaction to avoid FK constraint issues)
-app.delete('/api/requests/:id', (req, res) => {
+app.delete('/api/requests/:id', async (req, res) => {
     try {
-        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
         
         // Use transaction to ensure atomicity
-        const deleteAll = db.transaction(() => {
-            db.prepare('DELETE FROM notifications WHERE request_id = ?').run(req.params.id);
-            db.prepare('DELETE FROM requests WHERE id = ?').run(req.params.id);
-        });
-        deleteAll();
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM notifications WHERE request_id = $1', [req.params.id]);
+            await client.query('DELETE FROM requests WHERE id = $1', [req.params.id]);
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+        
         res.json({ message: 'Permohonan berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -367,30 +404,40 @@ app.delete('/api/requests/:id', (req, res) => {
 });
 
 // Get statistics
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', async (req, res) => {
     try {
-        const total = db.prepare('SELECT COUNT(*) as count FROM requests').get().count;
-        const pending = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'pending'").get().count;
-        const approved = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'approved'").get().count;
-        const rejected = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'rejected'").get().count;
-        const completed = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'completed'").get().count;
-        
-        res.json({ total, pending, approved, rejected, completed });
+        const result = await pool.query(`
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'pending') as pending,
+                COUNT(*) FILTER (WHERE status = 'approved') as approved,
+                COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
+                COUNT(*) FILTER (WHERE status = 'completed') as completed
+            FROM requests
+        `);
+        const row = result.rows[0];
+        res.json({
+            total: parseInt(row.total),
+            pending: parseInt(row.pending),
+            approved: parseInt(row.approved),
+            rejected: parseInt(row.rejected),
+            completed: parseInt(row.completed)
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
 // Get notifications log
-app.get('/api/notifications', (req, res) => {
+app.get('/api/notifications', async (req, res) => {
     try {
         const { request_id } = req.query;
         let notificationsList;
         
         if (request_id) {
-            notificationsList = db.prepare('SELECT * FROM notifications WHERE request_id = ? ORDER BY created_at DESC').all(request_id);
+            notificationsList = await db.prepare('SELECT * FROM notifications WHERE request_id = $1 ORDER BY created_at DESC').all(request_id);
         } else {
-            notificationsList = db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100').all();
+            notificationsList = await db.prepare('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100').all();
         }
         
         res.json(notificationsList);
@@ -400,19 +447,18 @@ app.get('/api/notifications', (req, res) => {
 });
 
 // ===== AUTHENTICATION =====
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
-        const admin = db.prepare('SELECT * FROM admins WHERE username = ? AND password = ?').get(username, password);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1 AND password = $2').get(username, password);
         
         if (admin) {
-            // Update last login time
-            db.prepare("UPDATE admins SET last_login_at = datetime('now') WHERE id = ?").run(admin.id);
+            await db.prepare("UPDATE admins SET last_login_at = NOW()::TEXT WHERE id = $1").run(admin.id);
             
             res.json({ 
-                success: true, 
-                username: admin.username, 
+                success: true,
+                username: admin.username,
                 nama: admin.nama,
                 password_changed_at: admin.password_changed_at,
                 last_login_at: new Date().toISOString()
@@ -428,11 +474,10 @@ app.post('/api/login', (req, res) => {
 // ===== PASSWORD MANAGEMENT =====
 
 // Change password
-app.put('/api/admin/change-password', (req, res) => {
+app.put('/api/admin/change-password', async (req, res) => {
     try {
         const { username, current_password, new_password } = req.body;
         
-        // Validation
         if (!username || !current_password || !new_password) {
             return res.status(400).json({ error: 'Semua ruangan mesti diisi' });
         }
@@ -441,15 +486,13 @@ app.put('/api/admin/change-password', (req, res) => {
             return res.status(400).json({ error: 'Kata laluan baru mesti sekurang-kurangnya 6 aksara' });
         }
         
-        // Verify current password
-        const admin = db.prepare('SELECT * FROM admins WHERE username = ? AND password = ?').get(username, current_password);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1 AND password = $2').get(username, current_password);
         
         if (!admin) {
             return res.status(401).json({ error: 'Kata laluan semasa salah' });
         }
         
-        // Update password
-        db.prepare("UPDATE admins SET password = ?, password_changed_at = datetime('now') WHERE id = ?").run(new_password, admin.id);
+        await db.prepare("UPDATE admins SET password = $1, password_changed_at = NOW()::TEXT WHERE id = $2").run(new_password, admin.id);
         
         res.json({ success: true, message: 'Kata laluan berjaya ditukar' });
     } catch (error) {
@@ -458,7 +501,7 @@ app.put('/api/admin/change-password', (req, res) => {
 });
 
 // Reset password to default
-app.put('/api/admin/reset-password', (req, res) => {
+app.put('/api/admin/reset-password', async (req, res) => {
     try {
         const { username } = req.body;
         
@@ -466,19 +509,17 @@ app.put('/api/admin/reset-password', (req, res) => {
             return res.status(400).json({ error: 'Nama pengguna diperlukan' });
         }
         
-        // Check if admin exists
-        const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(username);
         
         if (!admin) {
             return res.status(404).json({ error: 'Admin tidak ditemui' });
         }
         
-        // Reset to default password
         const defaultPassword = 'admin123';
-        db.prepare('UPDATE admins SET password = ?, password_changed_at = NULL WHERE id = ?').run(defaultPassword, admin.id);
+        await db.prepare('UPDATE admins SET password = $1, password_changed_at = NULL WHERE id = $2').run(defaultPassword, admin.id);
         
         res.json({ 
-            success: true, 
+            success: true,
             message: 'Kata laluan berjaya direset ke lalai',
             default_password: defaultPassword
         });
@@ -488,7 +529,7 @@ app.put('/api/admin/reset-password', (req, res) => {
 });
 
 // Get admin info
-app.get('/api/admin/info', (req, res) => {
+app.get('/api/admin/info', async (req, res) => {
     try {
         const { username } = req.query;
         
@@ -496,7 +537,7 @@ app.get('/api/admin/info', (req, res) => {
             return res.status(400).json({ error: 'Nama pengguna diperlukan' });
         }
         
-        const admin = db.prepare('SELECT username, nama, password_changed_at, last_login_at FROM admins WHERE username = ?').get(username);
+        const admin = await db.prepare('SELECT username, nama, password_changed_at, last_login_at FROM admins WHERE username = $1').get(username);
         
         if (!admin) {
             return res.status(404).json({ error: 'Admin tidak ditemui' });
@@ -511,7 +552,7 @@ app.get('/api/admin/info', (req, res) => {
 // ===== USER MANAGEMENT =====
 
 // User registration
-app.post('/api/users/register', (req, res) => {
+app.post('/api/users/register', async (req, res) => {
     try {
         const { username, password, nama, jawatan, no_hp, email } = req.body;
         
@@ -527,25 +568,24 @@ app.post('/api/users/register', (req, res) => {
             return res.status(400).json({ error: 'Kata laluan mesti sekurang-kurangnya 6 aksara' });
         }
         
-        // Check if username already exists
-        const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+        const existing = await db.prepare('SELECT id FROM users WHERE username = $1').get(username);
         if (existing) {
             return res.status(400).json({ error: 'Nama pengguna telah digunakan' });
         }
         
-        const stmt = db.prepare(
-            "INSERT INTO users (username, password, nama, jawatan, no_hp, email, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))"
+        const result = await pool.query(
+            "INSERT INTO users (username, password, nama, jawatan, no_hp, email, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()::TEXT) RETURNING id",
+            [username, password, nama, jawatan || '', no_hp || '', email || '']
         );
-        const result = stmt.run(username, password, nama, jawatan || '', no_hp || '', email || '');
         
-        res.status(201).json({ success: true, message: 'Pendaftaran berjaya', userId: result.lastInsertRowid });
+        res.status(201).json({ success: true, message: 'Pendaftaran berjaya', userId: result.rows[0].id });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
 // User login
-app.post('/api/users/login', (req, res) => {
+app.post('/api/users/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
@@ -553,14 +593,13 @@ app.post('/api/users/login', (req, res) => {
             return res.status(400).json({ error: 'Nama pengguna dan kata laluan wajib diisi' });
         }
         
-        const user = db.prepare('SELECT * FROM users WHERE username = ? AND password = ? AND is_active = 1').get(username, password);
+        const user = await db.prepare('SELECT * FROM users WHERE username = $1 AND password = $2 AND is_active = 1').get(username, password);
         
         if (!user) {
             return res.status(401).json({ error: 'Nama pengguna atau kata laluan salah' });
         }
         
-        // Update last login
-        db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(user.id);
+        await db.prepare("UPDATE users SET last_login_at = NOW()::TEXT WHERE id = $1").run(user.id);
         
         res.json({
             success: true,
@@ -579,9 +618,9 @@ app.post('/api/users/login', (req, res) => {
 });
 
 // Get all users (admin only)
-app.get('/api/users', (req, res) => {
+app.get('/api/users', async (req, res) => {
     try {
-        const users = db.prepare('SELECT id, username, nama, jawatan, no_hp, email, is_active, created_at, last_login_at FROM users ORDER BY created_at DESC').all();
+        const users = await db.prepare('SELECT id, username, nama, jawatan, no_hp, email, is_active, created_at, last_login_at FROM users ORDER BY created_at DESC').all();
         res.json(users);
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -589,15 +628,15 @@ app.get('/api/users', (req, res) => {
 });
 
 // Toggle user active status (admin only)
-app.put('/api/users/:id/toggle', (req, res) => {
+app.put('/api/users/:id/toggle', async (req, res) => {
     try {
-        const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+        const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(req.params.id);
         if (!user) {
             return res.status(404).json({ error: 'Pengguna tidak ditemui' });
         }
         
         const newStatus = user.is_active ? 0 : 1;
-        db.prepare('UPDATE users SET is_active = ? WHERE id = ?').run(newStatus, req.params.id);
+        await db.prepare('UPDATE users SET is_active = $1 WHERE id = $2').run(newStatus, req.params.id);
         
         res.json({ success: true, is_active: newStatus, message: newStatus ? 'Pengguna diaktifkan' : 'Pengguna dinyahaktifkan' });
     } catch (error) {
@@ -606,14 +645,14 @@ app.put('/api/users/:id/toggle', (req, res) => {
 });
 
 // Delete user (admin only)
-app.delete('/api/users/:id', (req, res) => {
+app.delete('/api/users/:id', async (req, res) => {
     try {
-        const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+        const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(req.params.id);
         if (!user) {
             return res.status(404).json({ error: 'Pengguna tidak ditemui' });
         }
         
-        db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+        await db.prepare('DELETE FROM users WHERE id = $1').run(req.params.id);
         res.json({ success: true, message: 'Pengguna berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -621,12 +660,21 @@ app.delete('/api/users/:id', (req, res) => {
 });
 
 // Get user stats (admin only)
-app.get('/api/users/stats', (req, res) => {
+app.get('/api/users/stats', async (req, res) => {
     try {
-        const total = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-        const active = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 1').get().count;
-        const inactive = db.prepare('SELECT COUNT(*) as count FROM users WHERE is_active = 0').get().count;
-        res.json({ total, active, inactive });
+        const result = await pool.query(`
+            SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE is_active = 1) as active,
+                COUNT(*) FILTER (WHERE is_active = 0) as inactive
+            FROM users
+        `);
+        const row = result.rows[0];
+        res.json({
+            total: parseInt(row.total),
+            active: parseInt(row.active),
+            inactive: parseInt(row.inactive)
+        });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -635,14 +683,20 @@ app.get('/api/users/stats', (req, res) => {
 // ===== DANGER ZONE =====
 
 // Reset all requests data
-app.delete('/api/admin/reset-data', (req, res) => {
+app.delete('/api/admin/reset-data', async (req, res) => {
     try {
-        // Use transaction to ensure FK constraints are respected
-        const resetAll = db.transaction(() => {
-            db.prepare('DELETE FROM notifications').run();
-            db.prepare('DELETE FROM requests').run();
-        });
-        resetAll();
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('DELETE FROM notifications');
+            await client.query('DELETE FROM requests');
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
         res.json({ success: true, message: 'Semua data berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -650,9 +704,9 @@ app.delete('/api/admin/reset-data', (req, res) => {
 });
 
 // Reset all users
-app.put('/api/admin/reset-users', (req, res) => {
+app.put('/api/admin/reset-users', async (req, res) => {
     try {
-        db.prepare('DELETE FROM users').run();
+        await pool.query('DELETE FROM users');
         res.json({ success: true, message: 'Semua pengguna berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -660,13 +714,13 @@ app.put('/api/admin/reset-users', (req, res) => {
 });
 
 // Reset to default password
-app.put('/api/admin/reset-to-default', (req, res) => {
+app.put('/api/admin/reset-to-default', async (req, res) => {
     try {
         const defaultPassword = 'admin123';
-        db.prepare('UPDATE admins SET password = ?, password_changed_at = NULL').run(defaultPassword);
+        await pool.query("UPDATE admins SET password = $1, password_changed_at = NULL", [defaultPassword]);
         
         res.json({ 
-            success: true, 
+            success: true,
             message: 'Kata laluan berjaya direset ke lalai',
             default_password: defaultPassword
         });
@@ -676,9 +730,9 @@ app.put('/api/admin/reset-to-default', (req, res) => {
 });
 
 // Export data as CSV
-app.get('/api/export', (req, res) => {
+app.get('/api/export', async (req, res) => {
     try {
-        const requests = db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
+        const requests = await db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
         
         const headers = ['Nama', 'Jawatan', 'No. HP', 'Emel', 'No. Plate', 'Tujuan', 'Tarikh Bertolak', 'Tarikh Kembali', 'Odo Sebelum', 'Odo Selepas', 'Jarak', 'Status', 'Tarikh Kembali Kenderaan'];
         const rows = requests.map(r => [
@@ -733,7 +787,6 @@ function getNetworkIPs() {
     
     for (const name of Object.keys(interfaces)) {
         for (const iface of interfaces[name]) {
-            // Skip internal (loopback) and non-IPv4 addresses
             if (iface.family === 'IPv4' && !iface.internal) {
                 addresses.push({
                     name: name,
@@ -745,31 +798,34 @@ function getNetworkIPs() {
     return addresses;
 }
 
-// Start server on all network interfaces (0.0.0.0)
-app.listen(PORT, '0.0.0.0', () => {
-    console.log('\n========================================');
-    console.log('🚗 SISTEM PENGGUNAAN KENDERAAN');
-    console.log('========================================');
-    console.log(`✅ Server berjalan di port ${PORT}`);
-    console.log(`📊 Database: vehicle_requests.db\n`);
-    
-    console.log('🌐 Akses Portal:');
-    console.log(`   • Local:    http://localhost:${PORT}`);
-    
-    const networkIPs = getNetworkIPs();
-    if (networkIPs.length > 0) {
-        console.log('\n📱 Akses dari Peranti Lain (WiFi/LAN):');
-        networkIPs.forEach(ip => {
-            console.log(`   • ${ip.name}: http://${ip.address}:${PORT}`);
+// Start server
+async function startServer() {
+    try {
+        await initDatabase();
+        
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log('\n========================================');
+            console.log('🚗 SISTEM PENGGUNAAN KENDERAAN');
+            console.log('========================================');
+            console.log(`✅ Server berjalan di port ${PORT}`);
+            console.log(`📊 Database: PostgreSQL\n`);
+            
+            console.log('🌐 Akses Portal:');
+            console.log(`   • Local:    http://localhost:${PORT}`);
+            
+            const networkIPs = getNetworkIPs();
+            if (networkIPs.length > 0) {
+                console.log('\n📱 Akses dari Peranti Lain (WiFi/LAN):');
+                networkIPs.forEach(ip => {
+                    console.log(`   • ${ip.name}: http://${ip.address}:${PORT}`);
+                });
+            }
+            console.log('========================================\n');
         });
-    } else {
-        console.log('\n⚠️  Tiada IP rangkaian ditemui.');
+    } catch (error) {
+        console.error('❌ Failed to start server:', error.message);
+        process.exit(1);
     }
-    
-    console.log('\n📋 URL untuk dikongsi kepada pengguna:');
-    if (networkIPs.length > 0) {
-        console.log(`   Pengguna: http://${networkIPs[0]?.address || 'YOUR_IP'}:${PORT}`);
-        console.log(`   Admin:    http://${networkIPs[0]?.address || 'YOUR_IP'}:${PORT}/admin`);
-    }
-    console.log('========================================\n');
-});
+}
+
+startServer();
