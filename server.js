@@ -912,7 +912,12 @@ app.post('/api/admin/restore', async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', db: !!pool, timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'ok', 
+        db: !!pool, 
+        databaseUrl: !!process.env.DATABASE_URL,
+        timestamp: new Date().toISOString() 
+    });
 });
 
 // Serve HTML pages
