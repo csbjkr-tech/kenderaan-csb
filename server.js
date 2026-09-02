@@ -186,6 +186,13 @@ const notificationStatus = notifications.initialize();
 console.log('📧 Email notifications:', notificationStatus.email ? 'ENABLED' : 'DISABLED');
 console.log('📱 SMS notifications:', notificationStatus.sms ? 'ENABLED' : 'DISABLED');
 
+// Helper: extract readable error message
+function errMsg(error) {
+    if (!error) return 'Unknown error';
+    if (typeof error === 'string') return error;
+    return error.message || error.detail || error.hint || JSON.stringify(error);
+}
+
 // ===== API ROUTES =====
 
 // Get all requests
@@ -202,7 +209,7 @@ app.get('/api/requests', async (req, res) => {
         
         res.json(requests);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -217,7 +224,7 @@ app.get('/api/requests/:id', async (req, res) => {
         
         res.json(request);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -248,7 +255,7 @@ app.post('/api/requests', async (req, res) => {
         const newRequest = await db.prepare('SELECT * FROM requests WHERE id = $1').get(id);
         res.status(201).json(newRequest);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -283,7 +290,7 @@ app.put('/api/requests/:id', async (req, res) => {
         const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         res.json(updated);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -313,7 +320,7 @@ app.put('/api/requests/:id/approve', async (req, res) => {
         
         res.json(updated);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -345,7 +352,7 @@ app.put('/api/requests/:id/reject', async (req, res) => {
         
         res.json(updated);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -374,7 +381,7 @@ app.put('/api/requests/:id/return', async (req, res) => {
         const updated = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         res.json(updated);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -402,7 +409,7 @@ app.delete('/api/requests/:id', async (req, res) => {
         
         res.json({ message: 'Permohonan berjaya dipadam' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -427,7 +434,7 @@ app.get('/api/stats', async (req, res) => {
             completed: parseInt(row.completed)
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -445,7 +452,7 @@ app.get('/api/notifications', async (req, res) => {
         
         res.json(notificationsList);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -470,7 +477,7 @@ app.post('/api/login', async (req, res) => {
             res.status(401).json({ success: false, error: 'Nama pengguna atau kata laluan salah' });
         }
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -499,7 +506,7 @@ app.put('/api/admin/change-password', async (req, res) => {
         
         res.json({ success: true, message: 'Kata laluan berjaya ditukar' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -527,7 +534,7 @@ app.put('/api/admin/reset-password', async (req, res) => {
             default_password: defaultPassword
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -548,7 +555,7 @@ app.get('/api/admin/info', async (req, res) => {
         
         res.json(admin);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -583,7 +590,7 @@ app.post('/api/users/register', async (req, res) => {
         
         res.status(201).json({ success: true, message: 'Pendaftaran berjaya', userId: result.rows[0].id });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -616,7 +623,7 @@ app.post('/api/users/login', async (req, res) => {
             }
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -626,7 +633,7 @@ app.get('/api/users', async (req, res) => {
         const users = await db.prepare('SELECT id, username, nama, jawatan, no_hp, email, is_active, created_at, last_login_at FROM users ORDER BY created_at DESC').all();
         res.json(users);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -643,7 +650,7 @@ app.put('/api/users/:id/toggle', async (req, res) => {
         
         res.json({ success: true, is_active: newStatus, message: newStatus ? 'Pengguna diaktifkan' : 'Pengguna dinyahaktifkan' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -658,7 +665,7 @@ app.delete('/api/users/:id', async (req, res) => {
         await db.prepare('DELETE FROM users WHERE id = $1').run(req.params.id);
         res.json({ success: true, message: 'Pengguna berjaya dipadam' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -679,7 +686,7 @@ app.get('/api/users/stats', async (req, res) => {
             inactive: parseInt(row.inactive)
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -702,7 +709,7 @@ app.delete('/api/admin/reset-data', async (req, res) => {
         }
         res.json({ success: true, message: 'Semua data berjaya dipadam' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -712,7 +719,7 @@ app.put('/api/admin/reset-users', async (req, res) => {
         await pool.query('DELETE FROM users');
         res.json({ success: true, message: 'Semua pengguna berjaya dipadam' });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -728,7 +735,7 @@ app.put('/api/admin/reset-to-default', async (req, res) => {
             default_password: defaultPassword
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -764,7 +771,7 @@ app.get('/api/export', async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.send('\ufeff' + csvContent);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -802,7 +809,7 @@ app.get('/api/admin/backup', async (req, res) => {
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.json(backup);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
@@ -899,7 +906,7 @@ app.post('/api/admin/restore', async (req, res) => {
             client.release();
         }
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: errMsg(error) });
     }
 });
 
