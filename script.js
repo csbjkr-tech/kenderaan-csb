@@ -367,6 +367,91 @@ async function resetToDefault() {
     catch (e) { alert('Ralat: ' + e.message); }
 }
 
+// ===== BACKUP & RESTORE =====
+async function backupData() {
+    try {
+        const response = await fetch('/api/admin/backup');
+        if (!response.ok) throw new Error('Gagal memuat turun backup');
+        const backup = await response.json();
+
+        // Trigger download
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_kenderaan_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert(`✅ Backup berjaya!\n\n📊 Jumlah data:\n• Permohonan: ${backup.counts.requests}\n• Pengguna: ${backup.counts.users}\n• Admin: ${backup.counts.admins}\n• Notifikasi: ${backup.counts.notifications}`);
+    } catch (e) {
+        alert('Ralat: ' + e.message);
+    }
+}
+
+async function restoreData(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById('restoreStatus');
+    statusEl.classList.remove('hidden');
+    statusEl.style.background = '#e8f4fd';
+    statusEl.style.color = '#1e3c72';
+    statusEl.textContent = '⏳ Sedang memulihkan data...';
+
+    try {
+        const text = await file.text();
+        const backup = JSON.parse(text);
+
+        if (!backup.data) {
+            throw new Error('Format backup tidak sah');
+        }
+
+        // Confirm before restore
+        const counts = backup.counts || {};
+        const confirmed = confirm(
+            `⚠️ PAULIHKAN DATA?\n\nIni akan menggantikan SEMUA data sedia ada dengan data backup:\n\n` +
+            `• Permohonan: ${counts.requests || 0}\n` +
+            `• Pengguna: ${counts.users || 0}\n` +
+            `• Admin: ${counts.admins || 0}\n` +
+            `• Notifikasi: ${counts.notifications || 0}\n\n` +
+            `Tarikh backup: ${backup.exported_at || 'Tidak diketahui'}\n\n` +
+            `Tekan OK untuk teruskan.`
+        );
+
+        if (!confirmed) {
+            statusEl.classList.add('hidden');
+            input.value = '';
+            return;
+        }
+
+        const result = await apiPost('/api/admin/restore', { backup });
+
+        statusEl.style.background = '#d4edda';
+        statusEl.style.color = '#155724';
+        statusEl.innerHTML = `✅ Data berjaya dipulihkan!\n<br>• Permohonan: ${result.restored.requests}\n<br>• Pengguna: ${result.restored.users}\n<br>• Admin: ${result.restored.admins}\n<br>• Notifikasi: ${result.restored.notifications}`;
+
+        // Reload data
+        await loadAdminData();
+        await loadSettingsData();
+        const usersTab = document.getElementById('usersTab');
+        if (usersTab && !usersTab.classList.contains('hidden')) await loadUsersData();
+
+        // Clear file input
+        input.value = '';
+
+        // Auto-hide status after 5s
+        setTimeout(() => statusEl.classList.add('hidden'), 5000);
+    } catch (e) {
+        statusEl.style.background = '#f8d7da';
+        statusEl.style.color = '#721c24';
+        statusEl.textContent = '❌ Ralat: ' + e.message;
+        input.value = '';
+    }
+}
+
 // ===== USER FORM =====
 function validateForm(data) {
     if (!data.nama || !data.jawatan || !data.no_hp || !data.no_plate || !data.tujuan) { alert('Sila isi semua ruangan wajib!'); return false; }

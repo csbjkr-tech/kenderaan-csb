@@ -765,6 +765,141 @@ app.get('/api/export', async (req, res) => {
     }
 });
 
+// ===== BACKUP & RESTORE =====
+
+// Backup all data as JSON
+app.get('/api/admin/backup', async (req, res) => {
+    try {
+        const requests = await db.prepare('SELECT * FROM requests ORDER BY created_at ASC').all();
+        const users = await db.prepare('SELECT * FROM users ORDER BY created_at ASC').all();
+        const admins = await db.prepare('SELECT * FROM admins ORDER BY id ASC').all();
+        const notifs = await db.prepare('SELECT * FROM notifications ORDER BY created_at ASC').all();
+
+        const backup = {
+            version: 1,
+            exported_at: new Date().toISOString(),
+            app_name: 'Sistem Penggunaan Kenderaan CSB',
+            data: {
+                requests,
+                users,
+                admins,
+                notifications: notifs
+            },
+            counts: {
+                requests: requests.length,
+                users: users.length,
+                admins: admins.length,
+                notifications: notifs.length
+            }
+        };
+
+        const filename = `backup_kenderaan_${new Date().toISOString().split('T')[0]}.json`;
+
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.json(backup);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Restore data from JSON backup
+app.post('/api/admin/restore', async (req, res) => {
+    try {
+        const { backup } = req.body;
+
+        if (!backup || !backup.data) {
+            return res.status(400).json({ error: 'Format backup tidak sah' });
+        }
+
+        const { requests, users, admins, notifications } = backup.data;
+
+        // Use a single transaction for atomicity
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Clear existing data (notifications first due to FK)
+            await client.query('DELETE FROM notifications');
+            await client.query('DELETE FROM requests');
+            await client.query('DELETE FROM users');
+            await client.query('DELETE FROM admins');
+
+            // Restore admins (preserve structure)
+            if (admins && admins.length > 0) {
+                for (const a of admins) {
+                    await client.query(
+                        `INSERT INTO admins (id, username, password, nama, password_changed_at, last_login_at)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                         ON CONFLICT (username) DO UPDATE SET
+                         password = EXCLUDED.password, nama = EXCLUDED.nama,
+                         password_changed_at = EXCLUDED.password_changed_at, last_login_at = EXCLUDED.last_login_at`,
+                        [a.id, a.username, a.password, a.nama, a.password_changed_at, a.last_login_at]
+                    );
+                }
+            }
+
+            // Restore users
+            if (users && users.length > 0) {
+                for (const u of users) {
+                    await client.query(
+                        `INSERT INTO users (id, username, password, nama, jawatan, no_hp, email, is_active, created_at, last_login_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                         ON CONFLICT (username) DO UPDATE SET
+                         password = EXCLUDED.password, nama = EXCLUDED.nama, jawatan = EXCLUDED.jawatan,
+                         no_hp = EXCLUDED.no_hp, email = EXCLUDED.email, is_active = EXCLUDED.is_active`,
+                        [u.id, u.username, u.password, u.nama, u.jawatan || '', u.no_hp || '', u.email || '', u.is_active ?? 1, u.created_at, u.last_login_at]
+                    );
+                }
+            }
+
+            // Restore requests
+            if (requests && requests.length > 0) {
+                for (const r of requests) {
+                    await client.query(
+                        `INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at, approved_at, rejected_at, admin_notes, returned_at)
+                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                         ON CONFLICT (id) DO NOTHING`,
+                        [r.id, r.nama, r.jawatan, r.no_hp, r.email, r.no_plate, r.tujuan, r.tarikh_bertolak, r.tarikh_kembali, r.odo_sebelum, r.odo_selepas, r.status, r.created_at, r.approved_at, r.rejected_at, r.admin_notes || '', r.returned_at]
+                    );
+                }
+            }
+
+            // Restore notifications
+            if (notifications && notifications.length > 0) {
+                for (const n of notifications) {
+                    await client.query(
+                        `INSERT INTO notifications (id, request_id, type, recipient, status, error_message, created_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7)
+                         ON CONFLICT DO NOTHING`,
+                        [n.id, n.request_id, n.type, n.recipient, n.status, n.error_message, n.created_at]
+                    );
+                }
+            }
+
+            await client.query('COMMIT');
+
+            res.json({
+                success: true,
+                message: 'Data berjaya dipulihkan',
+                restored: {
+                    requests: requests?.length || 0,
+                    users: users?.length || 0,
+                    admins: admins?.length || 0,
+                    notifications: notifications?.length || 0
+                }
+            });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Serve HTML pages
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));

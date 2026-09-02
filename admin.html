@@ -207,6 +207,19 @@
                         </div>
                     </div>
                     
+                    <div class="settings-card">
+                        <h3>💾 Backup & Restore</h3>
+                        <p style="color:#666;margin-bottom:15px">Simpan atau pulihkan semua data sistem.</p>
+                        <div class="danger-actions">
+                            <button class="btn btn-primary btn-sm" onclick="backupData()">📥 Muat Turun Backup</button>
+                            <label class="btn btn-success btn-sm" style="cursor:pointer">
+                                📤 Muat Naik Restore
+                                <input type="file" id="restoreFileInput" accept=".json" style="display:none" onchange="restoreData(this)">
+                            </label>
+                        </div>
+                        <div id="restoreStatus" class="hidden" style="margin-top:10px;padding:10px;border-radius:8px"></div>
+                    </div>
+
                     <div class="settings-card danger-zone">
                         <h3>⚠️ Zon Bahaya</h3>
                         <p className="danger-text">Tindakan di bawah tidak boleh diundur.</p>
