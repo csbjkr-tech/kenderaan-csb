@@ -903,6 +903,11 @@ app.post('/api/admin/restore', async (req, res) => {
     }
 });
 
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', db: !!pool, timestamp: new Date().toISOString() });
+});
+
 // Serve HTML pages
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -940,31 +945,30 @@ function getNetworkIPs() {
 async function startServer() {
     try {
         await initDatabase();
-        
-        app.listen(PORT, '0.0.0.0', () => {
-            console.log('\n========================================');
-            console.log('🚗 SISTEM PENGGUNAAN KENDERAAN');
-            console.log('========================================');
-            console.log(`✅ Server berjalan di port ${PORT}`);
-            console.log(`📊 Database: PostgreSQL\n`);
-            
-            console.log('🌐 Akses Portal:');
-            console.log(`   • Local:    http://localhost:${PORT}`);
-            
-            const networkIPs = getNetworkIPs();
-            if (networkIPs.length > 0) {
-                console.log('\n📱 Akses dari Peranti Lain (WiFi/LAN):');
-                networkIPs.forEach(ip => {
-                    console.log(`   • ${ip.name}: http://${ip.address}:${PORT}`);
-                });
-            }
-            console.log('========================================\n');
-        });
     } catch (error) {
-        console.error('❌ Failed to start server:', error.message);
-        console.error(error.stack);
-        process.exit(1);
+        console.error('⚠️ Database init failed:', error.message || error);
+        console.error(error.stack || '');
     }
+    
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log('\n========================================');
+        console.log('🚗 SISTEM PENGGUNAAN KENDERAAN');
+        console.log('========================================');
+        console.log(`✅ Server berjalan di port ${PORT}`);
+        console.log(`📊 Database: PostgreSQL\n`);
+        
+        console.log('🌐 Akses Portal:');
+        console.log(`   • Local:    http://localhost:${PORT}`);
+        
+        const networkIPs = getNetworkIPs();
+        if (networkIPs.length > 0) {
+            console.log('\n📱 Akses dari Peranti Lain (WiFi/LAN):');
+            networkIPs.forEach(ip => {
+                console.log(`   • ${ip.name}: http://${ip.address}:${PORT}`);
+            });
+        }
+        console.log('========================================\n');
+    });
 }
 
 startServer();
