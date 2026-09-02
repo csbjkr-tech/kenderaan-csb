@@ -8,6 +8,22 @@ const notifications = require('./notifications');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// ===== DEDUP: prevent rapid duplicate submissions =====
+const recentRequests = new Map();
+function isDuplicate(key) {
+    const now = Date.now();
+    const last = recentRequests.get(key);
+    if (last && (now - last) < 5000) return true;
+    recentRequests.set(key, now);
+    // Clean old entries every 100 entries
+    if (recentRequests.size > 100) {
+        for (const [k, v] of recentRequests) {
+            if (now - v > 10000) recentRequests.delete(k);
+        }
+    }
+    return false;
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -18,6 +34,7 @@ const db = new Database('vehicle_requests.db');
 
 // Enable WAL mode for better performance
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 // Create tables
 db.exec(`
@@ -80,16 +97,27 @@ db.exec(`
     )
 `);
 
-// ===== MIGRATION: Add missing columns to admins table =====
+// ===== MIGRATION: Add missing columns =====
 try {
-    const columns = db.prepare("PRAGMA table_info(admins)").all().map(c => c.name);
-    if (!columns.includes('password_changed_at')) {
+    // Admins table
+    const adminCols = db.prepare("PRAGMA table_info(admins)").all().map(c => c.name);
+    if (!adminCols.includes('password_changed_at')) {
         db.exec("ALTER TABLE admins ADD COLUMN password_changed_at TEXT DEFAULT NULL");
         console.log('✅ Added password_changed_at column to admins table');
     }
-    if (!columns.includes('last_login_at')) {
+    if (!adminCols.includes('last_login_at')) {
         db.exec("ALTER TABLE admins ADD COLUMN last_login_at TEXT DEFAULT NULL");
         console.log('✅ Added last_login_at column to admins table');
+    }
+    // Requests table
+    const reqCols = db.prepare("PRAGMA table_info(requests)").all().map(c => c.name);
+    if (!reqCols.includes('email')) {
+        db.exec("ALTER TABLE requests ADD COLUMN email TEXT");
+        console.log('✅ Added email column to requests table');
+    }
+    if (!reqCols.includes('returned_at')) {
+        db.exec("ALTER TABLE requests ADD COLUMN returned_at TEXT DEFAULT NULL");
+        console.log('✅ Added returned_at column to requests table');
     }
 } catch (error) {
     console.warn('⚠️ Migration warning:', error.message);
@@ -99,6 +127,18 @@ try {
 const adminExists = db.prepare('SELECT COUNT(*) as count FROM admins').get();
 if (adminExists.count === 0) {
     db.prepare('INSERT INTO admins (username, password, nama) VALUES (?, ?, ?)').run('admin', 'admin123', 'Administrator');
+}
+
+// Cleanup orphaned notifications (FK constraint safety)
+try {
+    const orphanCount = db.prepare(`
+        DELETE FROM notifications WHERE request_id NOT IN (SELECT id FROM requests)
+    `).run();
+    if (orphanCount.changes > 0) {
+        console.log(`🧹 Cleaned up ${orphanCount.changes} orphaned notification(s)`);
+    }
+} catch (error) {
+    console.warn('⚠️ Cleanup warning:', error.message);
 }
 
 // ===== INITIALIZE NOTIFICATIONS =====
@@ -152,6 +192,12 @@ app.post('/api/requests', (req, res) => {
         // Validation
         if (!nama || !jawatan || !no_hp || !no_plate || !tujuan || !tarikh_bertolak || !tarikh_kembali || !odo_sebelum) {
             return res.status(400).json({ error: 'Semua ruangan wajib mesti diisi' });
+        }
+
+        // Server-side dedup: reject if identical submission exists within 5 seconds
+        const dedupKey = `${nama}|${no_hp}|${no_plate.toUpperCase()}|${tujuan}|${tarikh_bertolak}|${tarikh_kembali}|${odo_sebelum}`;
+        if (isDuplicate(dedupKey)) {
+            return res.status(429).json({ error: 'Permohonan sama telah dihantar. Sila tunggu sebentar.' });
         }
         
         const stmt = db.prepare(`
@@ -271,7 +317,36 @@ app.put('/api/requests/:id/reject', async (req, res) => {
     }
 });
 
-// Delete request
+// Return vehicle (user updates odo_selepas and marks as completed)
+app.put('/api/requests/:id/return', (req, res) => {
+    try {
+        const { odo_selepas } = req.body;
+
+        const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        if (!existing) {
+            return res.status(404).json({ error: 'Permohonan tidak ditemui' });
+        }
+
+        if (existing.status !== 'approved') {
+            return res.status(400).json({ error: 'Hanya permohonan yang diluluskan boleh dikembalikan' });
+        }
+
+        if (!odo_selepas || odo_selepas < existing.odo_sebelum) {
+            return res.status(400).json({ error: 'Odo meter selepas mesti lebih besar daripada odo meter sebelum' });
+        }
+
+        db.prepare(
+            `UPDATE requests SET odo_selepas = ?, status = 'completed', returned_at = datetime('now') WHERE id = ?`
+        ).run(odo_selepas, req.params.id);
+
+        const updated = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+        res.json(updated);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Delete request (use transaction to avoid FK constraint issues)
 app.delete('/api/requests/:id', (req, res) => {
     try {
         const existing = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
@@ -279,7 +354,12 @@ app.delete('/api/requests/:id', (req, res) => {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
         
-        db.prepare('DELETE FROM requests WHERE id = ?').run(req.params.id);
+        // Use transaction to ensure atomicity
+        const deleteAll = db.transaction(() => {
+            db.prepare('DELETE FROM notifications WHERE request_id = ?').run(req.params.id);
+            db.prepare('DELETE FROM requests WHERE id = ?').run(req.params.id);
+        });
+        deleteAll();
         res.json({ message: 'Permohonan berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -293,8 +373,9 @@ app.get('/api/stats', (req, res) => {
         const pending = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'pending'").get().count;
         const approved = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'approved'").get().count;
         const rejected = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'rejected'").get().count;
+        const completed = db.prepare("SELECT COUNT(*) as count FROM requests WHERE status = 'completed'").get().count;
         
-        res.json({ total, pending, approved, rejected });
+        res.json({ total, pending, approved, rejected, completed });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -556,8 +637,12 @@ app.get('/api/users/stats', (req, res) => {
 // Reset all requests data
 app.delete('/api/admin/reset-data', (req, res) => {
     try {
-        db.prepare('DELETE FROM requests').run();
-        db.prepare('DELETE FROM notifications').run();
+        // Use transaction to ensure FK constraints are respected
+        const resetAll = db.transaction(() => {
+            db.prepare('DELETE FROM notifications').run();
+            db.prepare('DELETE FROM requests').run();
+        });
+        resetAll();
         res.json({ success: true, message: 'Semua data berjaya dipadam' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -595,7 +680,7 @@ app.get('/api/export', (req, res) => {
     try {
         const requests = db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
         
-        const headers = ['Nama', 'Jawatan', 'No. HP', 'Emel', 'No. Plate', 'Tujuan', 'Tarikh Bertolak', 'Tarikh Kembali', 'Odo Sebelum', 'Odo Selepas', 'Status'];
+        const headers = ['Nama', 'Jawatan', 'No. HP', 'Emel', 'No. Plate', 'Tujuan', 'Tarikh Bertolak', 'Tarikh Kembali', 'Odo Sebelum', 'Odo Selepas', 'Jarak', 'Status', 'Tarikh Kembali Kenderaan'];
         const rows = requests.map(r => [
             r.nama,
             r.jawatan,
@@ -607,7 +692,9 @@ app.get('/api/export', (req, res) => {
             r.tarikh_kembali,
             r.odo_sebelum,
             r.odo_selepas || '',
-            r.status
+            r.odo_selepas ? (r.odo_selepas - r.odo_sebelum) : '',
+            r.status,
+            r.returned_at || ''
         ]);
         
         const csvContent = [headers, ...rows]

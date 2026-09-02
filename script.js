@@ -414,6 +414,8 @@ async function updateStats() {
         document.getElementById('pendingRequests').textContent = s.pending;
         document.getElementById('approvedRequests').textContent = s.approved;
         document.getElementById('rejectedRequests').textContent = s.rejected;
+        const cr = document.getElementById('completedRequests');
+        if (cr) cr.textContent = s.completed || 0;
     } catch (e) { console.error('Ralat mengambil statistik:', e); }
 }
 
@@ -446,7 +448,7 @@ function renderRequests(requests) {
         </div>`).join('');
 }
 
-function getStatusText(s) { return { pending: 'Menunggu', approved: 'Diluluskan', rejected: 'Ditolak' }[s] || s; }
+function getStatusText(s) { return { pending: 'Menunggu', approved: 'Diluluskan', rejected: 'Ditolak', completed: 'Selesai' }[s] || s; }
 function formatDate(d) { return new Date(d).toLocaleDateString('ms-MY', { day: 'numeric', month: 'short', year: 'numeric' }); }
 
 async function viewDetails(id) {
@@ -466,7 +468,8 @@ async function viewDetails(id) {
             ${r.odo_selepas ? `<div class="detail-row"><span class="detail-label">Jarak:</span><span class="detail-value">${(r.odo_selepas - r.odo_sebelum).toLocaleString()} km</span></div>` : ''}
             <div class="detail-row"><span class="detail-label">Status:</span><span class="detail-value"><span class="status-badge ${r.status}">${getStatusText(r.status)}</span></span></div>
             <div class="detail-row"><span class="detail-label">Tarikh Permohonan:</span><span class="detail-value">${new Date(r.created_at).toLocaleString('ms-MY')}</span></div>
-            ${r.admin_notes ? `<div class="detail-row"><span class="detail-label">Nota Admin:</span><span class="detail-value">${r.admin_notes}</span></div>` : ''}`;
+            ${r.admin_notes ? `<div class="detail-row"><span class="detail-label">Nota Admin:</span><span class="detail-value">${r.admin_notes}</span></div>` : ''}
+            ${r.returned_at ? `<div class="detail-row"><span class="detail-label">Tarikh Kembali Kenderaan:</span><span class="detail-value">${new Date(r.returned_at).toLocaleString('ms-MY')}</span></div>` : ''}`;
         document.getElementById('modalFooter').innerHTML = `
             <button class="btn btn-secondary" onclick="closeModal()">Tutup</button>
             <button class="btn btn-primary btn-sm" onclick="printRequestDetails('${r.id}')">🖨️ Cetak</button>
@@ -528,6 +531,7 @@ async function printRequestDetails(id) {
         <div class="row"><span class="lbl">Status:</span><span class="val"><span class="badge ${r.status}">${getStatusText(r.status)}</span></span></div>
         <div class="row"><span class="lbl">Tarikh Permohonan:</span><span class="val">${new Date(r.created_at).toLocaleString('ms-MY')}</span></div>
         ${r.admin_notes ? `<div class="row"><span class="lbl">Nota Admin:</span><span class="val">${r.admin_notes}</span></div>` : ''}
+        ${r.returned_at ? `<div class="row"><span class="lbl">Tarikh Kembali Kenderaan:</span><span class="val">${new Date(r.returned_at).toLocaleString('ms-MY')}</span></div>` : ''}
         </div>
         <div class="sig"><div class="sig-box"><div class="sig-line"><p><strong>Pemohon</strong></p><p>${r.nama}</p></div></div>
         <div class="sig-box"><div class="sig-line"><p><strong>Pentadbir</strong></p><p>_________________</p></div></div></div>

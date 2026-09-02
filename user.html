@@ -151,6 +151,10 @@
                         <div class="stat-number" id="userRejectedRequests">0</div>
                         <div class="stat-label">Ditolak</div>
                     </div>
+                    <div class="stat-card" style="border-top-color:#2196F3">
+                        <div class="stat-number" id="userCompletedRequests" style="color:#2196F3">0</div>
+                        <div class="stat-label">Selesai</div>
+                    </div>
                 </div>
 
                 <div id="userRequestsList" class="requests-list">
@@ -164,54 +168,65 @@
             <!-- New Request Tab -->
             <div id="newRequestTab" class="tab-content hidden">
                 <div class="form-container">
-                    <form id="vehicleForm">
+                    <form id="vehicleForm" novalidate>
+                        <div id="formGlobalError" class="error-message hidden"></div>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label for="nama">Nama Penuh *</label>
                                 <input type="text" id="nama" name="nama" placeholder="Masukkan nama penuh" required>
+                                <small class="field-error hidden" id="err-nama"></small>
                             </div>
                             <div class="form-group">
                                 <label for="jawatan">Jawatan *</label>
                                 <input type="text" id="jawatan" name="jawatan" placeholder="Contoh: Pegawai Senggara" required>
+                                <small class="field-error hidden" id="err-jawatan"></small>
                             </div>
                             <div class="form-group">
                                 <label for="noHp">No. Telefon Bimbit *</label>
                                 <input type="tel" id="noHp" name="noHp" placeholder="Contoh: 0123456789" required>
+                                <small class="field-error hidden" id="err-noHp"></small>
                             </div>
                             <div class="form-group">
                                 <label for="email">Emel (untuk notifikasi)</label>
                                 <input type="email" id="email" name="email" placeholder="Contoh: nama@email.com">
-                                <small class="field-note">* Pilihan - untuk terima notifikasi kelulusan</small>
+                                <small class="field-error hidden" id="err-email"></small>
+                                <small class="field-note">Pilihan — untuk terima notifikasi kelulusan</small>
                             </div>
                             <div class="form-group">
                                 <label for="noPlate">No. Plat Kenderaan *</label>
                                 <input type="text" id="noPlate" name="noPlate" placeholder="Contoh: ABC 1234" required>
+                                <small class="field-error hidden" id="err-noPlate"></small>
                             </div>
                             <div class="form-group full-width">
                                 <label for="tujuan">Tujuan Penggunaan *</label>
                                 <textarea id="tujuan" name="tujuan" placeholder="Nyatakan tujuan penggunaan kenderaan..." rows="3" required></textarea>
+                                <small class="field-error hidden" id="err-tujuan"></small>
                             </div>
                             <div class="form-group">
                                 <label for="tarikhBertolak">Tarikh Bertolak *</label>
                                 <input type="date" id="tarikhBertolak" name="tarikhBertolak" required>
+                                <small class="field-error hidden" id="err-tarikhBertolak"></small>
                             </div>
                             <div class="form-group">
                                 <label for="tarikhKembali">Tarikh Kembali *</label>
                                 <input type="date" id="tarikhKembali" name="tarikhKembali" required>
+                                <small class="field-error hidden" id="err-tarikhKembali"></small>
                             </div>
                             <div class="form-group">
                                 <label for="odoSebelum">Odo Meter Sebelum *</label>
                                 <input type="number" id="odoSebelum" name="odoSebelum" placeholder="Contoh: 50000" min="0" required>
+                                <small class="field-error hidden" id="err-odoSebelum"></small>
                             </div>
                             <div class="form-group">
                                 <label for="odoSelepas">Odo Meter Selepas</label>
                                 <input type="number" id="odoSelepas" name="odoSelepas" placeholder="Diisi selepas kembali" min="0">
-                                <small class="field-note">* Boleh diisi kemudian</small>
+                                <small class="field-error hidden" id="err-odoSelepas"></small>
+                                <small class="field-note">Boleh diisi kemudian</small>
                             </div>
                         </div>
                         <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">📤 Hantar Permohonan</button>
-                            <button type="reset" class="btn btn-secondary">🗑️ Reset</button>
+                            <button type="submit" class="btn btn-primary" id="submitBtn">📤 Hantar Permohonan</button>
+                            <button type="button" class="btn btn-secondary" onclick="resetUserForm()">🗑️ Reset</button>
                         </div>
                     </form>
                 </div>
@@ -221,13 +236,60 @@
                     <h3>Permohonan Berjaya Dihantar!</h3>
                     <p>Tunggu kelulusan daripada admin.</p>
                     <p class="notification-info">📧 Notifikasi akan dihantar ke emel dan nombor telefon anda.</p>
-                    <button onclick="resetUserForm()" class="btn btn-primary">Buat Permohonan Baru</button>
+                    <div class="form-actions" style="margin-top:20px">
+                        <button onclick="resetUserForm()" class="btn btn-primary">📤 Pohon Baru</button>
+                        <button onclick="showUserTab('requests')" class="btn btn-secondary">📋 Lihat Permohonan Saya</button>
+                    </div>
                 </div>
             </div>
 
             <div class="footer">
                 <p>© 2024 Sistem Penggunaan Kenderaan | Cawangan Senggara Bangunan</p>
                 <p class="footer-org">Jabatan Kerja Raya Sabah</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-content" style="max-width:500px">
+            <div class="modal-header" style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:white;border-radius:20px 20px 0 0">
+                <h3 style="color:white">📋 Pengesahan Permohonan</h3>
+                <button class="modal-close" onclick="cancelConfirm()" style="color:white">✕</button>
+            </div>
+            <div class="modal-body" id="confirmBody">
+                <!-- Filled dynamically -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="cancelConfirm()">Batal</button>
+                <button class="btn btn-success" id="confirmSubmitBtn" onclick="confirmSubmit()">✅ Ya, Hantar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Return Vehicle Modal -->
+    <div id="returnModal" class="modal hidden">
+        <div class="modal-content" style="max-width:450px">
+            <div class="modal-header" style="background:linear-gradient(135deg,#2E7D32,#4CAF50);color:white;border-radius:20px 20px 0 0">
+                <h3 style="color:white">🔄 Kembalikan Kenderaan</h3>
+                <button class="modal-close" onclick="closeReturnModal()" style="color:white">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:15px;color:#666">Masukkan bacaan odometer selepas kenderaan digunakan:</p>
+                <div class="form-group">
+                    <label for="returnOdoSebelum" style="color:#1e3c72;font-weight:600">Odo Meter Sebelum</label>
+                    <input type="text" id="returnOdoSebelum" readonly style="background:#f5f5f5;color:#666;border:2px solid #e0e0e0;border-radius:10px;padding:12px 15px;width:100%;font-size:1em">
+                </div>
+                <div class="form-group" style="margin-top:15px">
+                    <label for="returnOdoSelepas" style="color:#1e3c72;font-weight:600">Odo Meter Selepas *</label>
+                    <input type="number" id="returnOdoSelepas" placeholder="Masukkan bacaan odometer semasa kembali" min="0" required style="border:2px solid #e0e0e0;border-radius:10px;padding:12px 15px;width:100%;font-size:1em">
+                    <small class="field-error hidden" id="err-returnOdoSelepas"></small>
+                </div>
+                <div id="returnError" class="error-message hidden" style="margin-top:10px"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeReturnModal()">Batal</button>
+                <button class="btn btn-success" id="confirmReturnBtn" onclick="confirmReturnVehicle()">✅ Sah Kembali</button>
             </div>
         </div>
     </div>

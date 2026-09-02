@@ -109,6 +109,10 @@
                         <div class="stat-number" id="rejectedRequests">0</div>
                         <div class="stat-label">Ditolak</div>
                     </div>
+                    <div class="stat-card" style="border-top-color:#2196F3">
+                        <div class="stat-number" id="completedRequests" style="color:#2196F3">0</div>
+                        <div class="stat-label">Selesai</div>
+                    </div>
                 </div>
                 
                 <div class="filter-bar">
@@ -118,6 +122,7 @@
                         <option value="pending">Menunggu</option>
                         <option value="approved">Diluluskan</option>
                         <option value="rejected">Ditolak</option>
+                        <option value="completed">Selesai</option>
                     </select>
                     <button class="btn btn-secondary btn-sm" onclick="exportData()">📥 Eksport Data</button>
                 </div>
