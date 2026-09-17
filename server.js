@@ -707,13 +707,57 @@ app.post('/api/admin/notifications/test', requireAdmin, async (req, res) => {
 });
 
 // ===== AUTHENTICATION =====
-app.post('/api/login', async (req, res) => {
+// ===== RATE LIMITING (lindungi endpoint login daripada brute-force) =====
+const rateBuckets = new Map();
+
+function clientIp(req) {
+    const fwd = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    return fwd || (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+
+function rateLimit({ windowMs, max, message, keyGen }) {
+    return (req, res, next) => {
+        const key = keyGen(req);
+        const now = Date.now();
+        const bucket = rateBuckets.get(key) || { count: 0, resetAt: now + windowMs };
+        if (now > bucket.resetAt) { bucket.count = 0; bucket.resetAt = now + windowMs; }
+        bucket.count += 1;
+        rateBuckets.set(key, bucket);
+        if (bucket.count > max) {
+            const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
+            res.set('Retry-After', String(retryAfter));
+            return res.status(429).json({ error: `${message} Sila cuba lagi dalam ${retryAfter} saat.` });
+        }
+        next();
+    };
+}
+
+// Bersihkan bucket yang luput supaya memori tidak membengkak
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, b] of rateBuckets) if (now > b.resetAt) rateBuckets.delete(k);
+}, 5 * 60 * 1000).unref();
+
+const loginKey = (req) => `login:${clientIp(req)}:${String((req.body && req.body.username) || '').toLowerCase()}`;
+const ipKey = (req) => `iplogin:${clientIp(req)}`;
+
+// Lapisan 1: maksimum 5 cubaan per akaun (IP + username) dalam 15 minit
+const loginAccountLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyGen: loginKey, message: 'Terlalu banyak cubaan log masuk untuk akaun ini.' });
+// Lapisan 2: maksimum 20 cubaan per IP (melintasi semua akaun) dalam 15 minit — halang password spraying
+const loginIpLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, keyGen: ipKey, message: 'Terlalu banyak cubaan log masuk dari rangkaian ini.' });
+// Pendaftaran: maksimum 3 akaun per IP dalam sejam — halang spam akaun
+const registerLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyGen: (req) => `register:${clientIp(req)}`, message: 'Terlalu banyak pendaftaran dari rangkaian ini.' });
+
+function clearLoginRate(req) { rateBuckets.delete(loginKey(req)); }
+
+app.post('/api/login', loginIpLimiter, loginAccountLimiter, async (req, res) => {
     try {
         const { username, password } = req.body;
         
         const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(username);
         
         if (admin && verifyPassword(password, admin.password)) {
+            clearLoginRate(req);
             await db.prepare("UPDATE admins SET last_login_at = NOW()::TEXT WHERE id = $1").run(admin.id);
             
             res.json({ 
@@ -838,7 +882,7 @@ app.get('/api/admin/info', requireAdmin, async (req, res) => {
 // ===== USER MANAGEMENT =====
 
 // User registration
-app.post('/api/users/register', async (req, res) => {
+app.post('/api/users/register', registerLimiter, async (req, res) => {
     try {
         const { username, password, nama, jawatan, no_hp, email } = req.body;
         
@@ -876,7 +920,7 @@ app.post('/api/users/register', async (req, res) => {
 });
 
 // User login
-app.post('/api/users/login', async (req, res) => {
+app.post('/api/users/login', loginIpLimiter, loginAccountLimiter, async (req, res) => {
     try {
         const { username, password } = req.body;
         
@@ -890,6 +934,7 @@ app.post('/api/users/login', async (req, res) => {
             return res.status(401).json({ error: 'Nama pengguna atau kata laluan salah' });
         }
         
+        clearLoginRate(req);
         await db.prepare("UPDATE users SET last_login_at = NOW()::TEXT WHERE id = $1").run(user.id);
         
         res.json({
