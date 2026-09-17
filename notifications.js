@@ -15,9 +15,11 @@ const EMAIL_CONFIG = {
 };
 
 const SMS_CONFIG = {
-    accountSid: process.env.TWILIO_SID || 'your-account-sid',
+    // Terima kedua-dua nama kunci (TWILIO_SID/TWILIO_ACCOUNT_SID, TWILIO_FROM/TWILIO_PHONE_NUMBER)
+    // supaya kedua-dua konvensyen .env berfungsi tanpa kegagalan senyap.
+    accountSid: process.env.TWILIO_SID || process.env.TWILIO_ACCOUNT_SID || 'your-account-sid',
     authToken: process.env.TWILIO_AUTH_TOKEN || 'your-auth-token',
-    fromNumber: process.env.TWILIO_FROM || '+1234567890'
+    fromNumber: process.env.TWILIO_FROM || process.env.TWILIO_PHONE_NUMBER || '+1234567890'
 };
 
 // ===== TRANSPORTERS =====

@@ -1,110 +1,50 @@
-# 🛠️ Panduan Baiki `DATABASE_URL` di Railway
+# 🛠️ Panduan Database Railway — Sistem Penggunaan Kenderaan CSB
 
-> **Masalah:** Server production hidup, tetapi `DATABASE_URL` tidak ditetapkan — semua query database gagal dengan `ECONNREFUSED`.
+> **STATUS: SELESAI ✅ (2026-09-17)** — Production kini berjalan dengan PostgreSQL penuh.
 
 ---
 
-## 🩺 Cara Sahkan Masalah (selepas fix /health)
+## 📖 Punca Sebenar Masalah (untuk rujukan masa depan)
 
-Buka: **https://kenderaan-csb-production.up.railway.app/health**
+Gejala: production `degraded`, API gagal `ECONNREFUSED`, `databaseUrl: false`.
+
+Punca: **Projek Railway `energetic-dream` (sistem kenderaan) TIDAK PERNAH ada plugin Postgres sendiri.** Plugin Postgres yang lama berada di projek lain (`imaginative-unity`), dan hostname-nya (`postgres.railway.internal`) hanya boleh dicapai dari rangkaian projek itu sendiri — maka sambungan selalu gagal.
+
+## ✅ Pembaikan Yang Dilakukan (2026-09-17)
+
+Melalui Railway CLI (`npm i -g @railway/cli` → `railway login --browserless`):
+
+```bash
+railway link -p energetic-dream -e production     # pautkan folder ke projek betul
+railway add -d postgres                            # cipta plugin Postgres dalam projek
+railway variables --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' \
+    -e production -s kenderaan-csb                 # wire variable ke service
+```
+
+Railway auto-redeploy → `/health` bertukar ke `"ok"`. Admin auto-seed (`admin`/`admin123`) terhasil automatik kerana jadual kosong.
+
+## 🩺 Semakan Kesihatan Production
+
+```
+GET https://kenderaan-csb-production.up.railway.app/health
+```
 
 | Keputusan | Maksud |
 |-----------|--------|
-| `"status": "ok"` + `"db": true` | ✅ Database berfungsi |
-| `"databaseUrl": false` | ❌ Variable `DATABASE_URL` tiada di Railway |
-| `"status": "degraded"` + `dbError` | ❌ Variable ada, tapi sambungan gagal (baca `dbError`) |
+| `"status": "ok"`, `"db": true` | ✅ Database berfungsi |
+| `"databaseUrl": false` | ❌ Variable `DATABASE_URL` tiada di runtime |
+| `"status": "degraded"` + `dbError` | ❌ Variable ada tapi sambungan gagal (baca `dbError`) |
 
----
+Endpoint ini melakukan ping DB sebenar (`SELECT 1`) sejak commit `7de8cd2`.
 
-## 📋 Langkah Pembaikan
+## 💾 Pasal Data
 
-### Langkah 1 — Buka Projek
+- Database baru bermula **kosong** — admin lalai `admin`/`admin123` dicipta automatik
+- Data lama (jika ada backup JSON): Panel Admin → **Backup & Restore** → muat naik fail backup
+- Database lokal mesin ini (`kenderaan_db` di PostgreSQL 18) adalah berasingan — tak terjejas
 
-1. Pergi ke [railway.app](https://railway.app) dan log masuk
-2. Klik projek **kenderaan-csb** (atau nama projek yang mengandungi service `kenderaan-csb-production`)
+## ⚠️ Nota Penyelenggaraan
 
-### Langkah 2 — Semak Ada Tak Plugin Postgres
-
-Dalam paparan **canvas** (lukisan kotak-kotak service):
-
-- **Kalau ADA kotak database Postgres** (ikon database/kura-kura 🐢):
-  - Klik kotak Postgres tersebut → tab **Connect**
-  - Salin **`DATABASE_URL`** (bermula dengan `postgresql://...`)
-  - → Terus ke **Langkah 4**
-
-- **Kalau TIADA kotak Postgres** (kemungkinan besar — dipadam atau tak pernah dibuat):
-  - Klik **+ Create** (tombol atas kanan canvas)
-  - Pilih **Database** → **Add PostgreSQL**
-  - Tunggu 1–2 minit sampai status jadi hijau
-  - Klik kotak Postgres baru → tab **Connect** → salin **`DATABASE_URL`**
-  - ⚠️ **PENTING:** Database baru ini KOSONG. Data lama hilang kecuali ada backup (lihat bahagian "Data Lama" di bawah)
-  - → Terus ke **Langkah 4**
-
-### Langkah 3 — (Semak dulu sebab masa lalu) Variable Hilang
-
-1. Klik **service Node** (kotak utama sistem kenderaan)
-2. Pergi tab **Variables**
-3. Cari `DATABASE_URL` dalam senarai
-4. Kalau wujud tapi kosong/salah format — itulah punca masalah
-
-### Langkah 4 — Tetapkan Variable
-
-1. Klik **service Node** → tab **Variables**
-2. Klik **+ New Variable** dan masukkan salah satu cara:
-
-   **Cara A (Disyorkan — auto-link):**
-   ```
-   Nama:  DATABASE_URL
-   Nilai: ${{Postgres.DATABASE_URL}}
-   ```
-   *(Nama reference mungkin berbeza ikut nama service Postgres — mula taip `${{Post` dan Railway akan tunjukkan pilihan yang sah)*
-
-   **Cara B (tampal terus):**
-   ```
-   Nama:  DATABASE_URL
-   Nilai: postgresql://postgres:PASSWORD@host:5432/railway
-   ```
-   *(Salin dari tab **Connect** kotak Postgres)*
-
-3. Klik **Add** — Railway akan **auto-redeploy** service Node (tunggu 1–2 minit)
-
-### Langkah 5 — Sahkan Pembaikan
-
-Tunggu deploy siap (tab **Deployments** tunjuk "Success"), kemudian buka:
-
-```
-https://kenderaan-csb-production.up.railway.app/health
-```
-
-Hasil yang diharap:
-
-```json
-{
-  "status": "ok",
-  "db": true,
-  "databaseUrl": true,
-  "dbError": null,
-  "timestamp": "..."
-}
-```
-
-Kemudian uji login admin di https://kenderaan-csb-production.up.railway.app/admin
-(`admin` / `admin123` — **hanya jika database baru & kosong**; jika database lama masih ada, guna kata laluan sedia ada)
-
----
-
-## 💾 Pasal Data Lama
-
-| Keadaan | Tindakan |
-|---------|----------|
-| Postgres plugin masih ada, cuma variable hilang | ✅ Data selamat — sambung semula saja |
-| Postgres plugin telah dipadam dari projek | ❌ Data hilang — perlu mulakan semula atau restore dari backup JSON |
-
-**Restore dari backup:** Panel Admin → bahagian **Backup & Restore** → muat naik fail JSON backup yang pernah dimuat turun.
-
----
-
-## 📌 Nota Tambahan
-
-- Commit `529837a` sudah fix SSL untuk sambungan PostgreSQL — konfigurasi SSL sepatutnya berfungsi automatik untuk host Railway
-- Kalau selepas fix masih `degraded` dengan `dbError` mengandungi `SSL` / `self signed certificate`, sila screenshot `dbError` tersebut untuk semakan lanjut
+- Jangan padam plugin **Postgres** dalam projek `energetic-dream` — itu kini database production yang sebenar
+- Volume `postgres-volume` menyimpan data — Railway mengekalkannya merentas deploy
+- Kata laluan DB tidak perlu diketahui oleh manusia; reference `${{Postgres.DATABASE_URL}}` mengurusnya secara automatik

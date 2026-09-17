@@ -274,6 +274,27 @@
         </div>
     </div>
     
+    <!-- Modal untuk confirm/prompt (ganti dialog native browser) -->
+    <div id="actionModal" class="modal hidden">
+        <div class="modal-content" style="max-width:440px">
+            <div class="modal-header">
+                <h3 id="actionModalTitle">Sahkan</h3>
+                <button class="modal-close" onclick="closeActionModal(false)">✕</button>
+            </div>
+            <div class="modal-body">
+                <p id="actionModalMessage" style="white-space:pre-line;line-height:1.7;margin:0 0 12px"></p>
+                <div id="actionModalInputWrap" class="hidden">
+                    <label id="actionModalInputLabel" for="actionModalInput" style="display:block;font-weight:600;margin-bottom:6px;color:#1e3c72"></label>
+                    <input type="text" id="actionModalInput" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;box-sizing:border-box" />
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeActionModal(false)">Batal</button>
+                <button class="btn btn-danger" id="actionModalOkBtn" onclick="closeActionModal(true)">Sahkan</button>
+            </div>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

@@ -2,12 +2,58 @@
 const API_URL = '';
 
 // ===== API HELPER FUNCTIONS =====
+// ===== DATABASE UNAVAILABLE DETECTION =====
+// Server /api/* memulangkan HTTP 500/503 bila database tak dapat dihubungi
+// (ECONNREFUSED, SASL, dsb.), dan 400 untuk ralat input pengguna.
+// Jadi: >=500 atau fetch gagal total => papar banner mesra + butang cuba semula.
+const dbErrorState = { down: false };
+
+function apiIsDbDown(err, res) {
+    if (res && (res.status >= 500)) return true;
+    if (err instanceof TypeError) return true; // fetch gagal total (rangkaian/server mati)
+    return false;
+}
+
+function setGlobalDbRetry(fn) {
+    window.__dbRetryFn = fn;
+}
+
+function clearDbErrorState() {
+    if (!dbErrorState.down) return;
+    dbErrorState.down = false;
+    document.querySelectorAll('.db-error-banner').forEach(b => b.remove());
+}
+
+function renderDbErrorBanner(container) {
+    if (!container || container.querySelector('.db-error-banner')) return;
+    dbErrorState.down = true;
+    const el = document.createElement('div');
+    el.className = 'db-error-banner';
+    el.innerHTML = `
+        <div class="db-error-icon">🔌</div>
+        <div class="db-error-text">
+            <strong>Database tidak tersedia</strong>
+            <p>Sistem tidak dapat menghubungi pelayan data buat masa ini. Sila cuba semula sebentar lagi.</p>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm db-retry-btn" onclick="window.__dbRetryFn && window.__dbRetryFn()">🔄 Cuba Semula</button>`;
+    container.appendChild(el);
+}
+
 async function apiGet(endpoint) {
-    const response = await fetch(`${API_URL}${endpoint}`);
-    if (!response.ok) {
-        throw new Error('Ralat semasa mengambil data');
+    try {
+        const response = await fetch(`${API_URL}${endpoint}`);
+        if (!response.ok) {
+            let body = null;
+            try { body = await response.json(); } catch (_) { /* body bukan JSON */ }
+            if (apiIsDbDown(null, { status: response.status, body })) dbErrorState.down = true;
+            throw new Error((body && body.error && typeof body.error === 'string') ? body.error : 'Ralat semasa mengambil data');
+        }
+        clearDbErrorState();
+        return response.json();
+    } catch (err) {
+        if (apiIsDbDown(err)) dbErrorState.down = true;
+        throw err;
     }
-    return response.json();
 }
 
 async function apiPost(endpoint, data) {
@@ -65,7 +111,7 @@ async function login(username, password) {
         }
         return { success: false };
     } catch (error) {
-        return { success: false, error: error.message };
+        return { success: false, error: dbErrorState.down ? '🔌 Database tidak tersedia. Sila cuba semula sebentar lagi.' : error.message };
     }
 }
 
@@ -291,6 +337,10 @@ async function loadUsersData() {
         renderUsers(users);
     } catch (e) {
         console.error('Ralat mengambil data pengguna:', e);
+        if (dbErrorState.down && !document.querySelector('.db-error-banner')) {
+            const c = document.getElementById('usersList');
+            if (c) { c.innerHTML = ''; renderDbErrorBanner(c); }
+        }
     }
 }
 
@@ -328,43 +378,47 @@ function renderUsers(users) {
 async function toggleUser(id) {
     try {
         const result = await apiPut(`/api/users/${id}/toggle`);
-        alert(`✅ ${result.message}`);
+        showToast(`✅ ${result.message}`);
         await loadUsersData();
     } catch (e) {
-        alert('Ralat: ' + e.message);
+        showToast('Ralat: ' + e.message, 'error');
     }
 }
 
 async function deleteUser(id, nama) {
-    if (!confirm(`⚠️ Padam pengguna "${nama}" secara kekal?`)) return;
+    const ok = await adminConfirm(`Padam pengguna "${nama}" secara kekal?`, { title: '🗑️ Padam Pengguna', okText: '🗑️ Ya, Padam' });
+    if (!ok) return;
     try {
         await apiDelete(`/api/users/${id}`);
-        alert('✅ Pengguna berjaya dipadam!');
+        showToast('✅ Pengguna berjaya dipadam!');
         await loadUsersData();
     } catch (e) {
-        alert('Ralat: ' + e.message);
+        showToast('Ralat: ' + e.message, 'error');
     }
 }
 
 // ===== DANGER ZONE =====
 async function resetAllData() {
-    if (!confirm('⚠️ AMARAN: Ini akan memadam SEMUA data permohonan dan pengguna!')) return;
-    if (!confirm('Adakah anda benar-benar pasti?')) return;
+    const ok1 = await adminConfirm('AMARAN: Ini akan memadam SEMUA data permohonan dan pengguna!', { title: '⚠️ Zon Bahaya — Reset Data', okText: 'Teruskan' });
+    if (!ok1) return;
+    const ok2 = await adminConfirm('Adakah anda benar-benar pasti? Tindakan ini TIDAK boleh diundur.', { title: '⚠️ Pengesahan Terakhir', okText: 'Ya, Padam Semua' });
+    if (!ok2) return;
     try {
         await apiDelete('/api/admin/reset-data');
         // Also reset users
         try { await apiPut('/api/admin/reset-users'); } catch (ignore) {}
-        alert('✅ Semua data berjaya dipadam!');
+        showToast('✅ Semua data berjaya dipadam!');
         await loadAdminData();
         const usersTab = document.getElementById('usersTab');
         if (usersTab && !usersTab.classList.contains('hidden')) await loadUsersData();
-    } catch (e) { alert('Ralat: ' + e.message); }
+    } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 async function resetToDefault() {
-    if (!confirm('⚠️ Reset kata laluan ke lalai (admin123)?')) return;
-    try { const r = await apiPut('/api/admin/reset-to-default'); alert(`✅ Kata laluan direset!\n\nLalai: ${r.default_password}`); }
-    catch (e) { alert('Ralat: ' + e.message); }
+    const ok = await adminConfirm('Reset kata laluan ke lalai (admin123)?', { title: '🔑 Reset Kata Laluan', okText: '🔑 Reset' });
+    if (!ok) return;
+    try { const r = await apiPut('/api/admin/reset-to-default'); showToast(`✅ Kata laluan direset! Lalai: ${r.default_password}`); }
+    catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 // ===== BACKUP & RESTORE =====
@@ -385,9 +439,9 @@ async function backupData() {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
-        alert(`✅ Backup berjaya!\n\n📊 Jumlah data:\n• Permohonan: ${backup.counts.requests}\n• Pengguna: ${backup.counts.users}\n• Admin: ${backup.counts.admins}\n• Notifikasi: ${backup.counts.notifications}`);
+        showToast(`✅ Backup berjaya! Permohonan: ${backup.counts.requests} · Pengguna: ${backup.counts.users} · Admin: ${backup.counts.admins} · Notifikasi: ${backup.counts.notifications}`);
     } catch (e) {
-        alert('Ralat: ' + e.message);
+        showToast('Ralat: ' + e.message, 'error');
     }
 }
 
@@ -409,16 +463,17 @@ async function restoreData(input) {
             throw new Error('Format backup tidak sah');
         }
 
-        // Confirm before restore
+        // Confirm before restore (modal khusus, bukan dialog native)
         const counts = backup.counts || {};
-        const confirmed = confirm(
-            `⚠️ PAULIHKAN DATA?\n\nIni akan menggantikan SEMUA data sedia ada dengan data backup:\n\n` +
+        const confirmed = await adminConfirm(
+            'PULIHKAN DATA?\n\n' +
+            `Ini akan menggantikan SEMUA data sedia ada dengan data backup:\n\n` +
             `• Permohonan: ${counts.requests || 0}\n` +
             `• Pengguna: ${counts.users || 0}\n` +
             `• Admin: ${counts.admins || 0}\n` +
             `• Notifikasi: ${counts.notifications || 0}\n\n` +
-            `Tarikh backup: ${backup.exported_at || 'Tidak diketahui'}\n\n` +
-            `Tekan OK untuk teruskan.`
+            `Tarikh backup: ${backup.exported_at || 'Tidak diketahui'}`,
+            { title: '♻️ Pulihkan Data', okText: '♻️ Ya, Pulihkan' }
         );
 
         if (!confirmed) {
@@ -454,10 +509,10 @@ async function restoreData(input) {
 
 // ===== USER FORM =====
 function validateForm(data) {
-    if (!data.nama || !data.jawatan || !data.no_hp || !data.no_plate || !data.tujuan) { alert('Sila isi semua ruangan wajib!'); return false; }
-    if (!/^[0-9]{10,11}$/.test(data.no_hp)) { alert('Nombor telefon tidak sah!'); return false; }
-    if (new Date(data.tarikh_kembali) < new Date(data.tarikh_bertolak)) { alert('Tarikh kembali mesti selepas tarikh bertolak!'); return false; }
-    if (data.odo_selepas && data.odo_selepas < data.odo_sebelum) { alert('Odo meter selepas mesti lebih besar!'); return false; }
+    if (!data.nama || !data.jawatan || !data.no_hp || !data.no_plate || !data.tujuan) { showToast('Sila isi semua ruangan wajib!', 'error'); return false; }
+    if (!/^[0-9]{10,11}$/.test(data.no_hp)) { showToast('Nombor telefon tidak sah! (contoh: 0123456789)', 'error'); return false; }
+    if (new Date(data.tarikh_kembali) < new Date(data.tarikh_bertolak)) { showToast('Tarikh kembali mesti selepas tarikh bertolak!', 'error'); return false; }
+    if (data.odo_selepas && data.odo_selepas < data.odo_sebelum) { showToast('Odo meter selepas mesti lebih besar!', 'error'); return false; }
     return true;
 }
 
@@ -480,7 +535,7 @@ async function handleFormSubmit(e) {
         await apiPost('/api/requests', fd);
         document.getElementById('vehicleForm').classList.add('hidden');
         document.getElementById('successMessage').classList.remove('hidden');
-    } catch (e) { alert('Ralat: ' + e.message); }
+    } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 function resetForm() {
@@ -501,7 +556,13 @@ async function updateStats() {
         document.getElementById('rejectedRequests').textContent = s.rejected;
         const cr = document.getElementById('completedRequests');
         if (cr) cr.textContent = s.completed || 0;
-    } catch (e) { console.error('Ralat mengambil statistik:', e); }
+    } catch (e) {
+        console.error('Ralat mengambil statistik:', e);
+        if (dbErrorState.down) {
+            setGlobalDbRetry(loadAdminData);
+            renderDbErrorBanner(document.querySelector('.stats-container'));
+        }
+    }
 }
 
 async function filterRequests() {
@@ -510,7 +571,13 @@ async function filterRequests() {
         const ep = f !== 'all' ? `/api/requests?status=${f}` : '/api/requests';
         const r = await apiGet(ep);
         renderRequests(r);
-    } catch (e) { console.error('Ralat mengambil permohonan:', e); }
+    } catch (e) {
+        console.error('Ralat mengambil permohonan:', e);
+        if (dbErrorState.down && !document.querySelector('.db-error-banner')) {
+            const c = document.getElementById('requestsList');
+            if (c) { c.innerHTML = ''; renderDbErrorBanner(c); }
+        }
+    }
 }
 
 function renderRequests(requests) {
@@ -561,24 +628,85 @@ async function viewDetails(id) {
             ${r.status === 'pending' ? `<button class="btn btn-success" onclick="approveRequest('${r.id}');closeModal();">✅ Lulus</button><button class="btn btn-danger" onclick="rejectRequest('${r.id}');closeModal();">❌ Tolak</button>` : ''}
             <button class="btn btn-danger btn-sm" onclick="deleteRequest('${r.id}')">🗑️ Padam</button>`;
         document.getElementById('detailModal').classList.remove('hidden');
-    } catch (e) { alert('Ralat: ' + e.message); }
+    } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 function closeModal() { document.getElementById('detailModal').classList.add('hidden'); }
 
+// ===== ACTION MODAL (ganti confirm/prompt native) =====
+// API: adminConfirm(message, {title, okText, danger}) => Promise<boolean>
+//      adminPrompt(message, defaultValue, {title, okText, placeholder}) => Promise<string|null>
+// Konsisten dengan modal khusus portal pengguna (tiada dialog native yang menyekat).
+let actionModalResolve = null;
+
+function openActionModal({ title = 'Sahkan', message = '', input = false, inputLabel = '', inputValue = '', okText = 'Sahkan', danger = true, placeholder = '' }) {
+    return new Promise(resolve => {
+        // Mod confirm pulangkan boolean; mod prompt pulangkan string (atau null bila batal)
+        actionModalResolve = (ok) => {
+            const inputEl = document.getElementById('actionModalInput');
+            resolve(input ? (ok ? (inputEl ? inputEl.value : '') : null) : ok);
+        };
+        document.getElementById('actionModalTitle').textContent = title;
+        document.getElementById('actionModalMessage').textContent = message;
+        const okBtn = document.getElementById('actionModalOkBtn');
+        okBtn.textContent = okText;
+        okBtn.className = danger ? 'btn btn-danger' : 'btn btn-success';
+        const wrap = document.getElementById('actionModalInputWrap');
+        const inputEl = document.getElementById('actionModalInput');
+        wrap.classList.toggle('hidden', !input);
+        if (input) {
+            document.getElementById('actionModalInputLabel').textContent = inputLabel;
+            inputEl.value = inputValue;
+            inputEl.placeholder = placeholder;
+        } else {
+            inputEl.value = '';
+        }
+        document.getElementById('actionModal').classList.remove('hidden');
+        if (input) setTimeout(() => inputEl.focus(), 50);
+    });
+}
+
+function closeActionModal(ok) {
+    const modal = document.getElementById('actionModal');
+    if (modal.classList.contains('hidden')) return;
+    modal.classList.add('hidden');
+    if (actionModalResolve) { actionModalResolve(ok); actionModalResolve = null; }
+}
+
+function adminConfirm(message, opts = {}) {
+    return openActionModal({ message, ...opts });
+}
+
+function adminPrompt(message, defaultValue = '', opts = {}) {
+    return openActionModal({ message, input: true, inputValue: defaultValue, ...opts });
+}
+
+// ===== TOAST NOTIFICATION (ganti alert untuk mesej ringkas) =====
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3500);
+}
+
 async function approveRequest(id) {
-    if (!confirm('Luluskan permohonan ini?')) return;
-    try { await apiPut(`/api/requests/${id}/approve`); await loadAdminData(); } catch (e) { alert('Ralat: ' + e.message); }
+    const ok = await adminConfirm('Luluskan permohonan ini? Notifikasi emel/SMS akan dihantar kepada pengguna.', { title: '✅ Kelulusan Permohonan', okText: '✅ Ya, Luluskan', danger: false });
+    if (!ok) return;
+    try { await apiPut(`/api/requests/${id}/approve`); await loadAdminData(); showToast('✅ Permohonan diluluskan'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 async function rejectRequest(id) {
-    const notes = prompt('Nota penolakan (pilihan):');
-    try { await apiPut(`/api/requests/${id}/reject`, { admin_notes: notes || '' }); await loadAdminData(); } catch (e) { alert('Ralat: ' + e.message); }
+    const notes = await adminPrompt('Nota penolakan (pilihan):', '', { title: '❌ Penolakan Permohonan', okText: '❌ Tolak', inputLabel: 'Nota penolakan', placeholder: 'Contoh: kenderaan diperlukan untuk tugas lain' });
+    if (notes === null) return;
+    try { await apiPut(`/api/requests/${id}/reject`, { admin_notes: notes || '' }); await loadAdminData(); showToast('Permohonan ditolak'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 async function deleteRequest(id) {
-    if (!confirm('Padam permohonan ini secara kekal?')) return;
-    try { await apiDelete(`/api/requests/${id}`); await loadAdminData(); closeModal(); } catch (e) { alert('Ralat: ' + e.message); }
+    const ok = await adminConfirm('Padam permohonan ini secara kekal?', { title: '🗑️ Padam Permohonan', okText: '🗑️ Ya, Padam' });
+    if (!ok) return;
+    try { await apiDelete(`/api/requests/${id}`); await loadAdminData(); closeModal(); showToast('Permohonan dipadam'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
 function exportData() { window.location.href = `${API_URL}/api/export`; }

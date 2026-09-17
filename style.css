@@ -599,3 +599,79 @@ input:focus.input-error, textarea:focus.input-error { border-color: #f44336 !imp
     .inactivity-actions { flex-direction: column; }
     .inactivity-actions .btn { width: 100%; }
 }
+
+/* ===== BANNER DATABASE TIDAK TERSEDIA ===== */
+.db-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: linear-gradient(135deg, #fff3e0, #fff8f0);
+    border: 2px solid #ff9800;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 10px 0;
+    animation: slideIn 0.3s ease;
+}
+
+.db-error-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+}
+
+.db-error-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.db-error-text strong {
+    display: block;
+    color: #e65100;
+    font-size: 16px;
+    margin-bottom: 2px;
+}
+
+.db-error-text p {
+    margin: 0;
+    color: #795548;
+    font-size: 14px;
+}
+
+.db-retry-btn {
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .db-error-banner { flex-direction: column; text-align: center; }
+}
+
+/* ===== TOAST NOTIFICATION ===== */
+.toast-notification {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    max-width: 380px;
+    background: #2e7d32;
+    color: #fff;
+    padding: 14px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    z-index: 10000;
+    line-height: 1.5;
+}
+
+.toast-notification.toast-error { background: #c62828; }
+.toast-notification.toast-info { background: #1565c0; }
+
+.toast-notification.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@media (max-width: 600px) {
+    .toast-notification { left: 16px; right: 16px; bottom: 16px; max-width: none; }
+}

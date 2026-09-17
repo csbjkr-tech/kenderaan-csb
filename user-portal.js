@@ -2,6 +2,29 @@
 const USER_AUTH_KEY = 'userAuth';
 const USER_DATA_KEY = 'userData';
 
+// ===== PHONE NORMALIZATION =====
+// Piawaikan kepada digit tanpa sengkang, bermula 0 (contoh: 0123456789).
+// Terima format biasa rakyat Malaysia: 012-345 6789, +60123456789, 60123456789, dsb.
+function normalizePhone(raw) {
+    let v = String(raw || '').trim();
+    v = v.replace(/\(0\)/g, '');          // (0) dalam nombor antarabangsa
+    v = v.replace(/[^0-9+]/g, '');         // buang sengkang, ruang, titik
+    if (v.startsWith('+60')) v = '0' + v.slice(3);      // +6012... -> 012...
+    else if (v.startsWith('60') && v.length >= 10) v = '0' + v.slice(2); // 6012... -> 012...
+    return v;
+}
+
+// Pasang auto-normalize semasa menaip pada input telefon (jika ada)
+function setupPhoneNormalizer(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('blur', () => {
+        const v = normalizePhone(el.value);
+        if (v !== el.value.trim()) el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+}
+
 // ===== AUTH HELPERS =====
 function isUserLoggedIn() {
     return localStorage.getItem(USER_AUTH_KEY) === 'true';
@@ -88,7 +111,7 @@ async function handleUserRegister(e) {
     const password = document.getElementById('regPassword').value;
     const nama = document.getElementById('regNama').value.trim();
     const jawatan = document.getElementById('regJawatan').value.trim();
-    const no_hp = document.getElementById('regNoHp').value.trim();
+    const no_hp = normalizePhone(document.getElementById('regNoHp').value);
     const email = document.getElementById('regEmail').value.trim();
 
     const errEl = document.getElementById('registerError');
@@ -98,6 +121,11 @@ async function handleUserRegister(e) {
 
     if (!username || !password || !nama) {
         errEl.textContent = 'Nama pengguna, kata laluan, dan nama penuh wajib diisi!';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    if (no_hp && !/^0[0-9]{9,10}$/.test(no_hp)) {
+        errEl.textContent = 'Format telefon tidak sah — 10–11 digit tanpa sengkang, bermula 0 (contoh: 0123456789).';
         errEl.classList.remove('hidden');
         return;
     }
@@ -172,6 +200,11 @@ async function loadUserRequests() {
             </div>`).join('');
     } catch (err) {
         console.error('Ralat memuatkan permohonan:', err);
+        if (dbErrorState.down) {
+            setGlobalDbRetry(loadUserRequests);
+            const list = document.getElementById('userRequestsList');
+            if (list) { list.innerHTML = ''; renderDbErrorBanner(list); }
+        }
     }
 }
 
@@ -197,7 +230,12 @@ async function viewUserRequest(id) {
             ${r.returned_at ? `<div class="detail-row"><span class="detail-label">Tarikh Kembali:</span><span class="detail-value">${new Date(r.returned_at).toLocaleString('ms-MY')}</span></div>` : ''}`;
         document.getElementById('detailModal').classList.remove('hidden');
     } catch (err) {
-        alert('Ralat: ' + err.message);
+        if (dbErrorState.down) {
+            setGlobalDbRetry(loadUserRequests);
+            alert('🔌 Database tidak tersedia buat masa ini. Sila cuba semula sebentar lagi.');
+        } else {
+            alert('Ralat: ' + err.message);
+        }
     }
 }
 
@@ -277,13 +315,17 @@ function setupUserForm() {
     document.getElementById('tarikhKembali').min = today;
     form.onsubmit = handleUserFormSubmit;
 
+    // Auto-baiki format telefon bila pengguna tinggalkan ruangan
+    setupPhoneNormalizer('noHp');
+    setupPhoneNormalizer('regNoHp');
+
     // Real-time validation: attach blur/input listeners
     const fields = [
         { id: 'nama', validate: v => v.length > 0 || 'Nama penuh wajib diisi' },
         { id: 'jawatan', validate: v => v.length > 0 || 'Jawatan wajib diisi' },
         { id: 'noHp', validate: v => {
             if (!v) return 'Nombor telefon wajib diisi';
-            if (!/^0[0-9]{9,10}$/.test(v)) return 'Format tidak sah (contoh: 0123456789)';
+            if (!/^0[0-9]{9,10}$/.test(v)) return 'Format tidak sah — 10–11 digit tanpa sengkang, bermula 0 (contoh: 0123456789)';
             return true;
         }},
         { id: 'email', validate: (v, optional) => {
@@ -387,7 +429,7 @@ async function handleUserFormSubmit(e) {
         ['jawatan', v => v.length > 0 || 'Jawatan wajib diisi'],
         ['noHp', v => {
             if (!v) return 'Nombor telefon wajib diisi';
-            if (!/^0[0-9]{9,10}$/.test(v)) return 'Format tidak sah (contoh: 0123456789)';
+            if (!/^0[0-9]{9,10}$/.test(v)) return 'Format tidak sah — 10–11 digit tanpa sengkang, bermula 0 (contoh: 0123456789)';
             return true;
         }],
         ['email', (v) => {
@@ -437,7 +479,7 @@ async function handleUserFormSubmit(e) {
     pendingFormData = {
         nama: document.getElementById('nama').value.trim(),
         jawatan: document.getElementById('jawatan').value.trim(),
-        no_hp: document.getElementById('noHp').value.trim(),
+        no_hp: normalizePhone(document.getElementById('noHp').value),
         email: document.getElementById('email')?.value.trim() || null,
         no_plate: document.getElementById('noPlate').value.trim().toUpperCase(),
         tujuan: document.getElementById('tujuan').value.trim(),
@@ -496,8 +538,17 @@ async function confirmSubmit() {
         pendingFormData = null;
     } catch (err) {
         const gErr = document.getElementById('formGlobalError');
-        if (gErr) { gErr.textContent = '❌ ' + err.message; gErr.classList.remove('hidden'); }
-        gErr?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (dbErrorState.down) {
+            setGlobalDbRetry(() => { gErr?.classList.add('hidden'); showUserTab('requests'); });
+            if (gErr) {
+                gErr.innerHTML = '🔌 <strong>Database tidak tersedia.</strong> Permohonan anda tidak dapat dihantar buat masa ini. &nbsp;<button type="button" class="btn btn-primary btn-sm" onclick="window.__dbRetryFn && window.__dbRetryFn()">🔄 Cuba Semula</button>';
+                gErr.classList.remove('hidden');
+                gErr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        } else {
+            if (gErr) { gErr.textContent = '❌ ' + err.message; gErr.classList.remove('hidden'); }
+            gErr?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
     } finally {
         formSubmitting = false;
         if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '📤 Hantar Permohonan'; }

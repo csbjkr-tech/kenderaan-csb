@@ -187,6 +187,20 @@ async function initDatabase() {
         console.log('✅ Default admin created');
     }
 
+    // ===== ANTI-DUPLICATE (lapisan 3): index unik peringkat DB =====
+    // Satu permohonan PENDING sahaja bagi setiap pengguna + kenderaan + tarikh bertolak.
+    // Atomi (dikuatkuasakan PostgreSQL) — kekal berkuatkuasa walaupun selepas restart server.
+    try {
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_requests_one_pending
+            ON requests (no_hp, UPPER(no_plate), tarikh_bertolak)
+            WHERE status = 'pending'
+        `);
+        console.log('✅ Duplicate-protection index ready (one pending per user/vehicle/date)');
+    } catch (e) {
+        console.warn('⚠️ Duplicate-protection index not created (data sedia ada mungkin ada duplikat):', e.message);
+    }
+
     // Cleanup orphaned notifications
     const orphanResult = await pool.query('DELETE FROM notifications WHERE request_id NOT IN (SELECT id FROM requests)');
     if (orphanResult.rowCount > 0) {
@@ -241,10 +255,21 @@ app.get('/api/requests/:id', async (req, res) => {
     }
 });
 
+// Normalize nombor telefon Malaysia kepada digit bermula 0 (0123456789).
+// Terima 012-345 6789, +60123456789, 6012-345678, dll.
+function normalizePhoneMY(raw) {
+    let v = String(raw || '').trim();
+    v = v.replace(/\(0\)/g, '');
+    v = v.replace(/[^0-9+]/g, '');
+    if (v.startsWith('+60')) v = '0' + v.slice(3);
+    else if (v.startsWith('60') && v.length >= 10) v = '0' + v.slice(2);
+    return v;
+}
+
 // Create new request
 app.post('/api/requests', async (req, res) => {
     try {
-        const { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
+        let { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
         
         // Generate ID
         const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -254,16 +279,52 @@ app.post('/api/requests', async (req, res) => {
             return res.status(400).json({ error: 'Semua ruangan wajib mesti diisi' });
         }
 
-        // Server-side dedup: reject if identical submission exists within 5 seconds
+        // Normalize telefon sebelum apa-apa semakan/rekod
+        no_hp = normalizePhoneMY(no_hp);
+        if (!/^0[0-9]{9,10}$/.test(no_hp)) {
+            return res.status(400).json({ error: 'Format nombor telefon tidak sah — guna 10–11 digit tanpa sengkang, bermula 0 (contoh: 0123456789)' });
+        }
+
+        // Server-side dedup LAYER 1: serangan pantas (in-memory, tetingkap 5 saat)
         const dedupKey = `${nama}|${no_hp}|${no_plate.toUpperCase()}|${tujuan}|${tarikh_bertolak}|${tarikh_kembali}|${odo_sebelum}`;
         if (isDuplicate(dedupKey)) {
             return res.status(429).json({ error: 'Permohonan sama telah dihantar. Sila tunggu sebentar.' });
         }
+
+        // Server-side dedup LAYER 2: semakan database (bertahan merentas restart server,
+        // melindungi retry lambat) — permohonan PENDING yang SAMA dalam tetingkap 24 jam.
+        const dup = await db.prepare(`
+            SELECT id, created_at FROM requests
+            WHERE status = 'pending'
+              AND UPPER(no_plate) = UPPER($1)
+              AND no_hp = $2
+              AND tujuan = $3
+              AND tarikh_bertolak = $4
+              AND tarikh_kembali = $5
+              AND odo_sebelum = $6
+              AND created_at::timestamptz >= NOW() - INTERVAL '24 hours'
+            LIMIT 1
+        `).get(no_plate, no_hp, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum);
+        if (dup) {
+            return res.status(409).json({
+                error: `Permohonan yang sama masih MENUNGGU kelulusan (dihantar ${dup.created_at}). Sila tunggu keputusan admin — jangan hantar semula.`
+            });
+        }
         
-        await db.prepare(`
-            INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', NOW()::TEXT)
-        `).run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null);
+        try {
+            await db.prepare(`
+                INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', NOW()::TEXT)
+            `).run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null);
+        } catch (insertErr) {
+            // Lapisan 3: unique partial index (23505) — perlindungan atomik dari race condition
+            if (insertErr.code === '23505') {
+                return res.status(409).json({
+                    error: 'Permohonan PENDING untuk pengguna/kenderaan/tarikh yang sama sudah wujud. Tunggu keputusan admin terlebih dahulu.'
+                });
+            }
+            throw insertErr;
+        }
         
         const newRequest = await db.prepare('SELECT * FROM requests WHERE id = $1').get(id);
         res.status(201).json(newRequest);
