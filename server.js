@@ -3,7 +3,12 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const dns = require('dns');
 const notifications = require('./notifications');
+
+// Rangkaian kontainer Railway tiada IPv6 — paksa DNS pulangkan IPv4 dahulu
+// (tanpa ini, nodemailer cuba sambung Gmail melalui IPv6 dan gagal ENETUNREACH)
+dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
