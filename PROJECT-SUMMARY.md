@@ -72,11 +72,15 @@ Status: completed (Selesai)
 - **Zon bahaya** (padam data, reset kata laluan)
 
 ### Ketahanan Sistem
+- **Anti-duplicate 3 lapisan** — (1) memory 5s, (2) semakan DB permohonan PENDING sama (plat+telefon+tarikh) dalam 24 jam → `409`, (3) **partial unique index PostgreSQL** `(no_hp, UPPER(no_plate), tarikh_bertolak) WHERE status='pending'` (atomik, race-condition-proof); duplicate legasi dibersihkan semasa boot supaya index pasti tercipta
 - **Health check sebenar** — `/health` melakukan ping database (`SELECT 1`), bukan sekadar semak variable; melaporkan `dbError` yang jelas bila gagal
 - **Banner "Database tidak tersedia"** — bila DB down, pengguna nampak mesej mesra dengan butang 🔄 **Cuba Semula** (bukan error kosong), di panel admin, portal pengguna, dan semasa hantar permohonan (data borang tidak hilang)
 - Server tetap hidup dalam mod **DEGRADED** walaupun database gagal — halaman web masih boleh diakses
 
 ### Keselamatan
+- **Auth token** (HMAC SHA-256, sah 12 jam): semua endpoint admin & user-management wajib `Authorization: Bearer <token>`; POST permohonan wajib token pengguna (`X-User-Token`)
+- **Kata laluan di-hash** (scrypt + salt) — migrasi automatik rekod legasi semasa boot; hash lama (teks kosong) disokong semasa log masuk lalu dinaik taraf
+- Permohonan dikaitkan dengan `user_id`; portal pengguna hanya nampak permohonan sendiri (`/api/requests/mine`)
 - Middleware penyekat fail sensitif daripada static serving: `*.db`, `*.env`, `*.log`, `*.bat`, `*.ps1`, `*.md`, `package-lock.json`, dan semua fail tersembunyi (`.`) — semua memulangkan 404
 - `.env` (kredensial) dikecualikan dari git
 
@@ -162,14 +166,17 @@ Status: completed (Selesai)
 ### Permohonan
 | Method | Endpoint | Penerangan |
 |--------|----------|------------|
-| `GET` | `/api/requests` | Senarai permohonan (boleh filter `?status=`) |
+| `GET` | `/api/requests` 🔒 | Senarai penuh (admin; boleh filter `?status=`) |
+| `GET` | `/api/requests/mine` 🔑 | Permohonan milik pengguna yang log masuk |
 | `GET` | `/api/requests/:id` | Butiran permohonan |
-| `POST` | `/api/requests` | Hantar permohonan baru |
+| `POST` | `/api/requests` 🔑 | Hantar permohonan baru (token pengguna wajib) |
 | `PUT` | `/api/requests/:id` | Kemaskini permohonan |
 | `PUT` | `/api/requests/:id/approve` | Luluskan |
 | `PUT` | `/api/requests/:id/reject` | Tolak (dengan nota admin) |
 | `PUT` | `/api/requests/:id/return` | Kembalikan kenderaan (odometer) |
 | `DELETE` | `/api/requests/:id` | Padam permohonan |
+
+🔑 = token pengguna · 🔒 = token admin
 
 ### Pengguna & Auth
 | Method | Endpoint | Penerangan |

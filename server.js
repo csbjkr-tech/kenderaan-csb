@@ -8,6 +8,76 @@ const notifications = require('./notifications');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// ===== AUTH HELPERS (token HMAC + hash kata laluan) =====
+const SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+function b64url(buf) { return Buffer.from(buf).toString('base64url'); }
+
+function signToken(payload) {
+    const body = b64url(JSON.stringify(payload));
+    const sig = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+    return `${body}.${sig}`;
+}
+
+function verifyToken(token, type) {
+    if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+    const [body, sig] = token.split('.');
+    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(body).digest('base64url');
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    try {
+        const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+        if (payload.t !== type) return null;
+        if (!payload.exp || Date.now() > payload.exp) return null;
+        return payload;
+    } catch { return null; }
+}
+
+function getAdminPayload(req) {
+    // Bearer header (biasa) atau ?token= untuk muat turun terus (export/backup)
+    const h = req.headers['authorization'] || '';
+    if (h.startsWith('Bearer ')) return verifyToken(h.slice(7), 'admin');
+    if (req.query && req.query.token) return verifyToken(String(req.query.token), 'admin');
+    return null;
+}
+
+function getUserPayload(req) {
+    const t = req.headers['x-user-token'] || '';
+    return verifyToken(t, 'user') ? { t: 'user', id: verifyToken(t, 'user').id } : null;
+}
+
+function requireAdmin(req, res, next) {
+    const p = getAdminPayload(req);
+    if (!p) return res.status(401).json({ error: 'Akses admin diperlukan. Sila log masuk semula.' });
+    req.admin = p;
+    next();
+}
+
+function requireUser(req, res, next) {
+    const t = req.headers['x-user-token'] || '';
+    const p = verifyToken(t, 'user');
+    if (!p) return res.status(401).json({ error: 'Sila log masuk untuk meneruskan.' });
+    req.user = p;
+    next();
+}
+
+function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
+    return salt + ':' + crypto.scryptSync(String(pw), salt, 64).toString('hex');
+}
+
+function verifyPassword(pw, stored) {
+    if (!stored) return false;
+    if (stored.includes(':')) {
+        const [salt, hash] = stored.split(':');
+        const test = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+        const a = Buffer.from(hash, 'hex');
+        const b = Buffer.from(test, 'hex');
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+    }
+    return stored === pw; // format legasi (teks kosong) — auto-migrasi semasa log masuk
+}
+
 // ===== DEDUP: prevent rapid duplicate submissions =====
 const recentRequests = new Map();
 function isDuplicate(key) {
@@ -183,8 +253,47 @@ async function initDatabase() {
     // Insert default admin if not exists
     const adminResult = await pool.query('SELECT COUNT(*) as count FROM admins');
     if (parseInt(adminResult.rows[0].count) === 0) {
-        await pool.query('INSERT INTO admins (username, password, nama) VALUES ($1, $2, $3)', ['admin', 'admin123', 'Administrator']);
-        console.log('✅ Default admin created');
+        await pool.query('INSERT INTO admins (username, password, nama) VALUES ($1, $2, $3)', ['admin', hashPassword('admin123'), 'Administrator']);
+        console.log('✅ Default admin created (kata laluan di-hash)');
+    }
+
+    // Migrasi kata laluan teks kosong (format legasi) -> scrypt hash
+    const plainAdmins = await pool.query("SELECT id, password FROM admins WHERE password NOT LIKE '%:%'");
+    for (const row of plainAdmins.rows) {
+        await pool.query('UPDATE admins SET password = $1 WHERE id = $2', [hashPassword(row.password), row.id]);
+        console.log(`🔐 Admin '${row.id}' password migrated to hash`);
+    }
+    const plainUsers = await pool.query("SELECT id, password FROM users WHERE password NOT LIKE '%:%'");
+    for (const row of plainUsers.rows) {
+        await pool.query('UPDATE users SET password = $1 WHERE id = $2', [hashPassword(row.password), row.id]);
+        console.log(`🔐 User '${row.id}' password migrated to hash`);
+    }
+
+    // ===== ANTI-DUPLICATE: kunci metadata permohonan ke pengguna yang log masuk =====
+    try {
+        await pool.query('ALTER TABLE requests ADD COLUMN IF NOT EXISTS user_id INTEGER');
+    } catch (e) {
+        console.warn('⚠️ Could not add user_id column:', e.message);
+    }
+
+    // ===== BERSIHKAN DUPLICATE LEGASI (sebelum index unik dicipta) =====
+    // Kumpul mengikut (no_hp, no_plate, tarikh_bertolak) pada status PENDING sahaja;
+    // kekalkan rekod paling awal, padam sisanya.
+    try {
+        const cleanup = await pool.query(`
+            DELETE FROM requests r
+            USING requests keep
+            WHERE r.status = 'pending' AND keep.status = 'pending'
+              AND r.no_hp = keep.no_hp
+              AND UPPER(r.no_plate) = UPPER(keep.no_plate)
+              AND r.tarikh_bertolak = keep.tarikh_bertolak
+              AND r.created_at > keep.created_at
+        `);
+        if (cleanup.rowCount > 0) {
+            console.log(`🧹 Cleaned up ${cleanup.rowCount} duplicate pending request(s)`);
+        }
+    } catch (e) {
+        console.warn('⚠️ Duplicate cleanup failed:', e.message);
     }
 
     // ===== ANTI-DUPLICATE (lapisan 3): index unik peringkat DB =====
@@ -240,6 +349,16 @@ app.get('/api/requests', async (req, res) => {
     }
 });
 
+// Get permohonan milik pengguna yang log masuk (token)
+app.get('/api/requests/mine', requireUser, async (req, res) => {
+    try {
+        const mine = await db.prepare('SELECT * FROM requests WHERE user_id = $1 ORDER BY created_at DESC').all(req.user.id);
+        res.json(mine);
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+});
+
 // Get single request
 app.get('/api/requests/:id', async (req, res) => {
     try {
@@ -267,7 +386,7 @@ function normalizePhoneMY(raw) {
 }
 
 // Create new request
-app.post('/api/requests', async (req, res) => {
+app.post('/api/requests', requireUser, async (req, res) => {
     try {
         let { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
         
@@ -292,30 +411,30 @@ app.post('/api/requests', async (req, res) => {
         }
 
         // Server-side dedup LAYER 2: semakan database (bertahan merentas restart server,
-        // melindungi retry lambat) — permohonan PENDING yang SAMA dalam tetingkap 24 jam.
+        // melindungi retry lambat) — permohonan PENDING yang SAMA (nombor + kenderaan + tarikh)
+        // dalam tetingkap 24 jam. Tujuan/odo tidak disertakan — double-submit selepas
+        // pengeditan kecil masih dianggap duplicate.
         const dup = await db.prepare(`
             SELECT id, created_at FROM requests
             WHERE status = 'pending'
               AND UPPER(no_plate) = UPPER($1)
               AND no_hp = $2
-              AND tujuan = $3
-              AND tarikh_bertolak = $4
-              AND tarikh_kembali = $5
-              AND odo_sebelum = $6
+              AND tarikh_bertolak = $3
+              AND tarikh_kembali = $4
               AND created_at::timestamptz >= NOW() - INTERVAL '24 hours'
             LIMIT 1
-        `).get(no_plate, no_hp, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum);
+        `).get(no_plate, no_hp, tarikh_bertolak, tarikh_kembali);
         if (dup) {
             return res.status(409).json({
-                error: `Permohonan yang sama masih MENUNGGU kelulusan (dihantar ${dup.created_at}). Sila tunggu keputusan admin — jangan hantar semula.`
+                error: `Permohonan untuk kenderaan ini pada tarikh yang sama masih MENUNGGU kelulusan (dihantar ${dup.created_at}). Sila tunggu keputusan admin — jangan hantar semula.`
             });
         }
         
         try {
             await db.prepare(`
-                INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', NOW()::TEXT)
-            `).run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null);
+                INSERT INTO requests (id, nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas, status, created_at, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'pending', NOW()::TEXT, $12)
+            `).run(id, nama, jawatan, no_hp, email || null, no_plate.toUpperCase(), tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas || null, req.user ? req.user.id : null);
         } catch (insertErr) {
             // Lapisan 3: unique partial index (23505) — perlindungan atomik dari race condition
             if (insertErr.code === '23505') {
@@ -535,15 +654,16 @@ app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         
-        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1 AND password = $2').get(username, password);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(username);
         
-        if (admin) {
+        if (admin && verifyPassword(password, admin.password)) {
             await db.prepare("UPDATE admins SET last_login_at = NOW()::TEXT WHERE id = $1").run(admin.id);
             
             res.json({ 
                 success: true,
                 username: admin.username,
                 nama: admin.nama,
+                token: signToken({ t: 'admin', u: admin.username, exp: Date.now() + 12 * 60 * 60 * 1000 }),
                 password_changed_at: admin.password_changed_at,
                 last_login_at: new Date().toISOString()
             });
@@ -558,11 +678,11 @@ app.post('/api/login', async (req, res) => {
 // ===== PASSWORD MANAGEMENT =====
 
 // Change password
-app.put('/api/admin/change-password', async (req, res) => {
+app.put('/api/admin/change-password', requireAdmin, async (req, res) => {
     try {
-        const { username, current_password, new_password } = req.body;
+        const { current_password, new_password } = req.body;
         
-        if (!username || !current_password || !new_password) {
+        if (!current_password || !new_password) {
             return res.status(400).json({ error: 'Semua ruangan mesti diisi' });
         }
         
@@ -570,13 +690,13 @@ app.put('/api/admin/change-password', async (req, res) => {
             return res.status(400).json({ error: 'Kata laluan baru mesti sekurang-kurangnya 6 aksara' });
         }
         
-        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1 AND password = $2').get(username, current_password);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(req.admin.u);
         
-        if (!admin) {
+        if (!admin || !verifyPassword(current_password, admin.password)) {
             return res.status(401).json({ error: 'Kata laluan semasa salah' });
         }
         
-        await db.prepare("UPDATE admins SET password = $1, password_changed_at = NOW()::TEXT WHERE id = $2").run(new_password, admin.id);
+        await db.prepare("UPDATE admins SET password = $1, password_changed_at = NOW()::TEXT WHERE id = $2").run(hashPassword(new_password), admin.id);
         
         res.json({ success: true, message: 'Kata laluan berjaya ditukar' });
     } catch (error) {
@@ -585,27 +705,20 @@ app.put('/api/admin/change-password', async (req, res) => {
 });
 
 // Reset password to default
-app.put('/api/admin/reset-password', async (req, res) => {
+app.put('/api/admin/reset-password', requireAdmin, async (req, res) => {
     try {
-        const { username } = req.body;
-        
-        if (!username) {
-            return res.status(400).json({ error: 'Nama pengguna diperlukan' });
-        }
-        
-        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(username);
+        const admin = await db.prepare('SELECT * FROM admins WHERE username = $1').get(req.admin.u);
         
         if (!admin) {
             return res.status(404).json({ error: 'Admin tidak ditemui' });
         }
         
-        const defaultPassword = 'admin123';
-        await db.prepare('UPDATE admins SET password = $1, password_changed_at = NULL WHERE id = $2').run(defaultPassword, admin.id);
+        await db.prepare('UPDATE admins SET password = $1, password_changed_at = NULL WHERE id = $2').run(hashPassword('admin123'), admin.id);
         
         res.json({ 
             success: true,
             message: 'Kata laluan berjaya direset ke lalai',
-            default_password: defaultPassword
+            default_password: 'admin123'
         });
     } catch (error) {
         res.status(500).json({ error: errMsg(error) });
@@ -613,15 +726,9 @@ app.put('/api/admin/reset-password', async (req, res) => {
 });
 
 // Get admin info
-app.get('/api/admin/info', async (req, res) => {
+app.get('/api/admin/info', requireAdmin, async (req, res) => {
     try {
-        const { username } = req.query;
-        
-        if (!username) {
-            return res.status(400).json({ error: 'Nama pengguna diperlukan' });
-        }
-        
-        const admin = await db.prepare('SELECT username, nama, password_changed_at, last_login_at FROM admins WHERE username = $1').get(username);
+        const admin = await db.prepare('SELECT username, nama, password_changed_at, last_login_at FROM admins WHERE username = $1').get(req.admin.u);
         
         if (!admin) {
             return res.status(404).json({ error: 'Admin tidak ditemui' });
@@ -657,9 +764,14 @@ app.post('/api/users/register', async (req, res) => {
             return res.status(400).json({ error: 'Nama pengguna telah digunakan' });
         }
         
+        let regPhone = no_hp ? normalizePhoneMY(no_hp) : '';
+        if (regPhone && !/^0[0-9]{9,10}$/.test(regPhone)) {
+            return res.status(400).json({ error: 'Format nombor telefon tidak sah — guna 10–11 digit tanpa sengkang, bermula 0 (contoh: 0123456789)' });
+        }
+        
         const result = await pool.query(
             "INSERT INTO users (username, password, nama, jawatan, no_hp, email, created_at) VALUES ($1, $2, $3, $4, $5, $6, NOW()::TEXT) RETURNING id",
-            [username, password, nama, jawatan || '', no_hp || '', email || '']
+            [username, hashPassword(password), nama, jawatan || '', regPhone, email || '']
         );
         
         res.status(201).json({ success: true, message: 'Pendaftaran berjaya', userId: result.rows[0].id });
@@ -677,9 +789,9 @@ app.post('/api/users/login', async (req, res) => {
             return res.status(400).json({ error: 'Nama pengguna dan kata laluan wajib diisi' });
         }
         
-        const user = await db.prepare('SELECT * FROM users WHERE username = $1 AND password = $2 AND is_active = 1').get(username, password);
+        const user = await db.prepare('SELECT * FROM users WHERE username = $1').get(username);
         
-        if (!user) {
+        if (!user || !user.is_active || !verifyPassword(password, user.password)) {
             return res.status(401).json({ error: 'Nama pengguna atau kata laluan salah' });
         }
         
@@ -687,6 +799,7 @@ app.post('/api/users/login', async (req, res) => {
         
         res.json({
             success: true,
+            token: signToken({ t: 'user', id: user.id, u: user.username, exp: Date.now() + 12 * 60 * 60 * 1000 }),
             user: {
                 id: user.id,
                 username: user.username,
@@ -702,7 +815,7 @@ app.post('/api/users/login', async (req, res) => {
 });
 
 // Get all users (admin only)
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', requireAdmin, async (req, res) => {
     try {
         const users = await db.prepare('SELECT id, username, nama, jawatan, no_hp, email, is_active, created_at, last_login_at FROM users ORDER BY created_at DESC').all();
         res.json(users);
@@ -712,7 +825,7 @@ app.get('/api/users', async (req, res) => {
 });
 
 // Toggle user active status (admin only)
-app.put('/api/users/:id/toggle', async (req, res) => {
+app.put('/api/users/:id/toggle', requireAdmin, async (req, res) => {
     try {
         const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(req.params.id);
         if (!user) {
@@ -729,7 +842,7 @@ app.put('/api/users/:id/toggle', async (req, res) => {
 });
 
 // Delete user (admin only)
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
     try {
         const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(req.params.id);
         if (!user) {
@@ -744,7 +857,7 @@ app.delete('/api/users/:id', async (req, res) => {
 });
 
 // Get user stats (admin only)
-app.get('/api/users/stats', async (req, res) => {
+app.get('/api/users/stats', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT
@@ -767,7 +880,7 @@ app.get('/api/users/stats', async (req, res) => {
 // ===== DANGER ZONE =====
 
 // Reset all requests data
-app.delete('/api/admin/reset-data', async (req, res) => {
+app.delete('/api/admin/reset-data', requireAdmin, async (req, res) => {
     try {
         const client = await pool.connect();
         try {
@@ -788,7 +901,7 @@ app.delete('/api/admin/reset-data', async (req, res) => {
 });
 
 // Reset all users
-app.put('/api/admin/reset-users', async (req, res) => {
+app.put('/api/admin/reset-users', requireAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM users');
         res.json({ success: true, message: 'Semua pengguna berjaya dipadam' });
@@ -798,10 +911,9 @@ app.put('/api/admin/reset-users', async (req, res) => {
 });
 
 // Reset to default password
-app.put('/api/admin/reset-to-default', async (req, res) => {
+app.put('/api/admin/reset-to-default', requireAdmin, async (req, res) => {
     try {
-        const defaultPassword = 'admin123';
-        await pool.query("UPDATE admins SET password = $1, password_changed_at = NULL", [defaultPassword]);
+        await pool.query("UPDATE admins SET password = $1, password_changed_at = NULL", [hashPassword('admin123')]);
         
         res.json({ 
             success: true,
@@ -814,7 +926,7 @@ app.put('/api/admin/reset-to-default', async (req, res) => {
 });
 
 // Export data as CSV
-app.get('/api/export', async (req, res) => {
+app.get('/api/export', requireAdmin, async (req, res) => {
     try {
         const requests = await db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
         
@@ -852,10 +964,10 @@ app.get('/api/export', async (req, res) => {
 // ===== BACKUP & RESTORE =====
 
 // Backup all data as JSON
-app.get('/api/admin/backup', async (req, res) => {
+app.get('/api/admin/backup', requireAdmin, async (req, res) => {
     try {
         const requests = await db.prepare('SELECT * FROM requests ORDER BY created_at ASC').all();
-        const users = await db.prepare('SELECT * FROM users ORDER BY created_at ASC').all();
+        const users = await db.prepare('SELECT id, username, nama, jawatan, no_hp, email, is_active, created_at, last_login_at FROM users ORDER BY created_at ASC').all();
         const admins = await db.prepare('SELECT * FROM admins ORDER BY id ASC').all();
         const notifs = await db.prepare('SELECT * FROM notifications ORDER BY created_at ASC').all();
 
@@ -888,7 +1000,7 @@ app.get('/api/admin/backup', async (req, res) => {
 });
 
 // Restore data from JSON backup
-app.post('/api/admin/restore', async (req, res) => {
+app.post('/api/admin/restore', requireAdmin, async (req, res) => {
     try {
         const { backup } = req.body;
 

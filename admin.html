@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Panel - Sistem Penggunaan Kenderaan</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- Token sesi disuntik server semasa hidup => dapatkan token admin sebelum JS lain berjalan -->
+    <meta name="csrf-token" content="__ADMIN_TOKEN__">
+    <link rel="stylesheet" href="style.css?v=audit2">
 </head>
 <body>
     <div class="container">
@@ -295,6 +296,6 @@
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=audit2"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 // ===== USER PORTAL - user-portal.js =====
 const USER_AUTH_KEY = 'userAuth';
 const USER_DATA_KEY = 'userData';
+const USER_TOKEN_KEY = 'userToken';
 
 // ===== PHONE NORMALIZATION =====
 // Piawaikan kepada digit tanpa sengkang, bermula 0 (contoh: 0123456789).
@@ -38,9 +39,14 @@ function getUserData() {
     }
 }
 
+function getUserToken() {
+    return localStorage.getItem(USER_TOKEN_KEY) || '';
+}
+
 function userLogout() {
     localStorage.removeItem(USER_AUTH_KEY);
     localStorage.removeItem(USER_DATA_KEY);
+    localStorage.removeItem(USER_TOKEN_KEY);
     location.reload();
 }
 
@@ -96,6 +102,7 @@ async function handleUserLogin(e) {
         if (result.success) {
             localStorage.setItem(USER_AUTH_KEY, 'true');
             localStorage.setItem(USER_DATA_KEY, JSON.stringify(result.user));
+            localStorage.setItem(USER_TOKEN_KEY, result.token || '');
             showUserDashboard();
         }
     } catch (err) {
@@ -160,15 +167,11 @@ function showUserDashboard() {
 
 // ===== LOAD USER REQUESTS =====
 async function loadUserRequests() {
-    const user = getUserData();
-    if (!user) return;
+    if (!isUserLoggedIn()) return;
 
     try {
-        // Get all requests and filter by user's name or phone
-        const allRequests = await apiGet('/api/requests');
-        const myRequests = allRequests.filter(r =>
-            r.nama === user.nama || r.no_hp === user.no_hp
-        );
+        // Endpoint khusus: hanya permohonan milik pengguna yang log masuk (token auth)
+        const myRequests = await apiGet('/api/requests/mine');
 
         // Update stats
         document.getElementById('userTotalRequests').textContent = myRequests.length;

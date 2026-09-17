@@ -2,6 +2,26 @@
 
 > **STATUS: SELESAI ✅ (2026-09-17)** — Production kini berjalan dengan PostgreSQL penuh.
 
+## 🔍 Audit Ke-2 (2026-09-17): Punca Duplicate Permohonan & Pembaikan Menyeluruh
+
+**Gejala:** setiap permohonan pengguna muncul 2 rekod di production.
+
+**Punca sebenar:** `user.html` (portal pengguna) memuatkan `script.js` (fail panel admin yang lama)
+BERSAMA `user-portal.js`. `script.js` masih mengandungi **kod borang lapuk** yang auto-attach
+handler submit ke borang `#vehicleForm` yang sama — maka setiap penghantaran dihantar 2 kali
+(sekali serta-merta oleh kod lapuk, sekali lagi selepas modal pengesahan).
+
+**Pembaikan audit (commit ini):**
+1. Kod borang lapuk dipadam dari `script.js` (panel admin kini tulen)
+2. **Auth token**: semua endpoint admin/user-management wajib Bearer token (HMAC, 12 jam)
+   — sebelum ini SESIAPA di internet boleh padam data melalui API terbuka
+3. **Kata laluan di-hash** (scrypt) — migrasi automatik untuk rekod lama semasa boot
+4. Permohonan dikaitkan dengan `user_id` + endpoint `/api/requests/mine` (portal papar hanya
+   permohonan sendiri — sebelum ini ia muat turun SEMUA permohonan semua pengguna)
+5. Pembersihan duplicate legasi semasa boot → index unik PostgreSQL kini **tercipta di production**
+6. Layer 2 dedup diperluas: cukup plat+telefon+tarikh (tujuan/odo tak lagi diwajibkan sama)
+7. Cache-buster `?v=` pada CSS/JS supaya browser tak pegang kod lama selepas deploy
+
 ---
 
 ## 📖 Punca Sebenar Masalah (untuk rujukan masa depan)

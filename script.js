@@ -1,6 +1,26 @@
 // ===== API BASE URL =====
 const API_URL = '';
 
+function getAdminToken() {
+    // Token dari log masuk semasa; fallback ke meta tag yang disuntik server
+    // (sesi yang masih hidup selepas deploy, tanpa log masuk semula)
+    return localStorage.getItem('adminToken') ||
+        (document.querySelector('meta[name="csrf-token"]')?.content || '').trim();
+}
+function getUserToken() { return localStorage.getItem('userToken') || ''; }
+
+function isAuthError(err) {
+    return typeof err?.message === 'string' &&
+        (err.message.includes('log masuk semula') || err.message.includes('Sila log masuk'));
+}
+
+function handleAuthError(err) {
+    if (!isAuthError(err)) return false;
+    showToast('Sesi telah tamat — sila log masuk semula.', 'error');
+    setTimeout(() => logout(), 1200);
+    return true;
+}
+
 // ===== API HELPER FUNCTIONS =====
 // ===== DATABASE UNAVAILABLE DETECTION =====
 // Server /api/* memulangkan HTTP 500/503 bila database tak dapat dihubungi
@@ -41,7 +61,7 @@ function renderDbErrorBanner(container) {
 
 async function apiGet(endpoint) {
     try {
-        const response = await fetch(`${API_URL}${endpoint}`);
+        const response = await fetch(`${API_URL}${endpoint}`, { headers: { 'Authorization': `Bearer ${getAdminToken()}`, 'X-User-Token': getUserToken() } });
         if (!response.ok) {
             let body = null;
             try { body = await response.json(); } catch (_) { /* body bukan JSON */ }
@@ -59,7 +79,7 @@ async function apiGet(endpoint) {
 async function apiPost(endpoint, data) {
     const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAdminToken()}`, 'X-User-Token': getUserToken() },
         body: JSON.stringify(data),
     });
     if (!response.ok) {
@@ -72,7 +92,7 @@ async function apiPost(endpoint, data) {
 async function apiPut(endpoint, data = null) {
     const options = {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAdminToken()}`, 'X-User-Token': getUserToken() },
     };
     if (data) options.body = JSON.stringify(data);
     const response = await fetch(`${API_URL}${endpoint}`, options);
@@ -84,7 +104,7 @@ async function apiPut(endpoint, data = null) {
 }
 
 async function apiDelete(endpoint) {
-    const response = await fetch(`${API_URL}${endpoint}`, { method: 'DELETE' });
+    const response = await fetch(`${API_URL}${endpoint}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getAdminToken()}`, 'X-User-Token': getUserToken() } });
     if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Ralat semasa memadam data');
@@ -105,6 +125,7 @@ async function login(username, password) {
         if (result.success) {
             localStorage.setItem(AUTH_KEY, 'true');
             localStorage.setItem('adminName', result.username);
+            localStorage.setItem('adminToken', result.token || '');
             startInactivityTimer();
             startAutoRefresh();
             return { success: true, nama: result.nama };
@@ -120,6 +141,7 @@ function logout() {
     stopAutoRefresh();
     localStorage.removeItem(AUTH_KEY);
     localStorage.removeItem('adminName');
+    localStorage.removeItem('adminToken');
     window.location.reload();
 }
 
@@ -381,6 +403,7 @@ async function toggleUser(id) {
         showToast(`✅ ${result.message}`);
         await loadUsersData();
     } catch (e) {
+        if (handleAuthError(e)) return;
         showToast('Ralat: ' + e.message, 'error');
     }
 }
@@ -424,7 +447,7 @@ async function resetToDefault() {
 // ===== BACKUP & RESTORE =====
 async function backupData() {
     try {
-        const response = await fetch('/api/admin/backup');
+        const response = await fetch('/api/admin/backup', { headers: { 'Authorization': `Bearer ${getAdminToken()}` } });
         if (!response.ok) throw new Error('Gagal memuat turun backup');
         const backup = await response.json();
 
@@ -507,45 +530,49 @@ async function restoreData(input) {
     }
 }
 
-// ===== USER FORM =====
-function validateForm(data) {
-    if (!data.nama || !data.jawatan || !data.no_hp || !data.no_plate || !data.tujuan) { showToast('Sila isi semua ruangan wajib!', 'error'); return false; }
-    if (!/^[0-9]{10,11}$/.test(data.no_hp)) { showToast('Nombor telefon tidak sah! (contoh: 0123456789)', 'error'); return false; }
-    if (new Date(data.tarikh_kembali) < new Date(data.tarikh_bertolak)) { showToast('Tarikh kembali mesti selepas tarikh bertolak!', 'error'); return false; }
-    if (data.odo_selepas && data.odo_selepas < data.odo_sebelum) { showToast('Odo meter selepas mesti lebih besar!', 'error'); return false; }
-    return true;
-}
+// ===== INIT =====
+document.addEventListener('DOMContentLoaded', function() {
+    const cpf = document.getElementById('changePasswordForm');
+    if (cpf) cpf.addEventListener('submit', handlePasswordChange);
 
-async function handleFormSubmit(e) {
-    e.preventDefault();
-    const fd = {
-        nama: document.getElementById('nama').value.trim(),
-        jawatan: document.getElementById('jawatan').value.trim(),
-        no_hp: document.getElementById('noHp').value.trim(),
-        email: document.getElementById('email')?.value.trim() || null,
-        no_plate: document.getElementById('noPlate').value.trim(),
-        tujuan: document.getElementById('tujuan').value.trim(),
-        tarikh_bertolak: document.getElementById('tarikhBertolak').value,
-        tarikh_kembali: document.getElementById('tarikhKembali').value,
-        odo_sebelum: parseInt(document.getElementById('odoSebelum').value),
-        odo_selepas: document.getElementById('odoSelepas').value ? parseInt(document.getElementById('odoSelepas').value) : null,
-    };
-    if (!validateForm(fd)) return;
-    try {
-        await apiPost('/api/requests', fd);
-        document.getElementById('vehicleForm').classList.add('hidden');
-        document.getElementById('successMessage').classList.remove('hidden');
-    } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
-}
+    setupActivityTracking();
 
-function resetForm() {
-    document.getElementById('vehicleForm').reset();
-    document.getElementById('vehicleForm').classList.remove('hidden');
-    document.getElementById('successMessage').classList.add('hidden');
-}
+    const loginSection = document.getElementById('loginSection');
+    const adminPanel = document.getElementById('adminPanel');
+    const loginForm = document.getElementById('loginForm');
 
-// ===== ADMIN PANEL =====
-async function loadAdminData() { await updateStats(); await filterRequests(); }
+    if (loginSection && adminPanel) {
+        if (isLoggedIn()) {
+            loginSection.classList.add('hidden');
+            adminPanel.classList.remove('hidden');
+            document.getElementById('adminName').textContent = localStorage.getItem('adminName') || 'Admin';
+            loadAdminData();
+            startInactivityTimer();
+            startAutoRefresh();
+        } else {
+            loginSection.classList.remove('hidden');
+            adminPanel.classList.add('hidden');
+        }
+
+        if (loginForm) {
+            loginForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                const username = document.getElementById('username').value.trim();
+                const password = document.getElementById('password').value;
+                const result = await login(username, password);
+                if (result.success) {
+                    loginSection.classList.add('hidden');
+                    adminPanel.classList.remove('hidden');
+                    document.getElementById('adminName').textContent = username;
+                    loadAdminData();
+                } else {
+                    document.getElementById('loginError').classList.remove('hidden');
+                    setTimeout(() => document.getElementById('loginError').classList.add('hidden'), 3000);
+                }
+            });
+        }
+    }
+});
 
 async function updateStats() {
     try {
@@ -709,7 +736,7 @@ async function deleteRequest(id) {
     try { await apiDelete(`/api/requests/${id}`); await loadAdminData(); closeModal(); showToast('Permohonan dipadam'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
 
-function exportData() { window.location.href = `${API_URL}/api/export`; }
+function exportData() { window.location.href = `${API_URL}/api/export?token=${encodeURIComponent(getAdminToken())}`; }
 
 // ===== PRINT FUNCTION =====
 async function printRequestDetails(id) {
@@ -756,57 +783,8 @@ async function printRequestDetails(id) {
     } catch (e) { alert('Ralat: ' + e.message); }
 }
 
-// ===== INIT =====
-document.addEventListener('DOMContentLoaded', function() {
-    const cpf = document.getElementById('changePasswordForm');
-    if (cpf) cpf.addEventListener('submit', handlePasswordChange);
-
-    setupActivityTracking();
-
-    const form = document.getElementById('vehicleForm');
-    if (form) {
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('tarikhBertolak').min = today;
-        document.getElementById('tarikhKembali').min = today;
-        form.addEventListener('submit', handleFormSubmit);
-    }
-
-    const loginSection = document.getElementById('loginSection');
-    const adminPanel = document.getElementById('adminPanel');
-    const loginForm = document.getElementById('loginForm');
-
-    if (loginSection && adminPanel) {
-        if (isLoggedIn()) {
-            loginSection.classList.add('hidden');
-            adminPanel.classList.remove('hidden');
-            document.getElementById('adminName').textContent = localStorage.getItem('adminName') || 'Admin';
-            loadAdminData();
-            startInactivityTimer();
-            startAutoRefresh();
-        } else {
-            loginSection.classList.remove('hidden');
-            adminPanel.classList.add('hidden');
-        }
-
-        if (loginForm) {
-            loginForm.addEventListener('submit', async function(e) {
-                e.preventDefault();
-                const username = document.getElementById('username').value.trim();
-                const password = document.getElementById('password').value;
-                const result = await login(username, password);
-                if (result.success) {
-                    loginSection.classList.add('hidden');
-                    adminPanel.classList.remove('hidden');
-                    document.getElementById('adminName').textContent = username;
-                    loadAdminData();
-                } else {
-                    document.getElementById('loginError').classList.remove('hidden');
-                    setTimeout(() => document.getElementById('loginError').classList.add('hidden'), 3000);
-                }
-            });
-        }
-    }
-});
+// ===== ADMIN PANEL =====
+async function loadAdminData() { await updateStats(); await filterRequests(); }
 
 // Close modal on outside click
 document.addEventListener('click', function(e) {
