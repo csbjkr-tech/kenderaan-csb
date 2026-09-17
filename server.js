@@ -488,7 +488,7 @@ app.put('/api/requests/:id', async (req, res) => {
 });
 
 // Approve request
-app.put('/api/requests/:id/approve', async (req, res) => {
+app.put('/api/requests/:id/approve', requireAdmin, async (req, res) => {
     try {
         const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {
@@ -518,7 +518,7 @@ app.put('/api/requests/:id/approve', async (req, res) => {
 });
 
 // Reject request
-app.put('/api/requests/:id/reject', async (req, res) => {
+app.put('/api/requests/:id/reject', requireAdmin, async (req, res) => {
     try {
         const { admin_notes } = req.body;
         
@@ -579,7 +579,7 @@ app.put('/api/requests/:id/return', async (req, res) => {
 });
 
 // Delete request (use transaction to avoid FK constraint issues)
-app.delete('/api/requests/:id', async (req, res) => {
+app.delete('/api/requests/:id', requireAdmin, async (req, res) => {
     try {
         const existing = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!existing) {

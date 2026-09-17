@@ -8,3 +8,4 @@ node_modules/
 cloudflared.exe
 start-all.bat
 start-tunnel.bat
+backups/
