@@ -26,6 +26,17 @@ function isDuplicate(key) {
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Block sensitive files from static serving (local DBs, env, logs, scripts, docs)
+app.use((req, res, next) => {
+    const p = req.path.toLowerCase();
+    const deny = p.startsWith('/.') ||
+        /\.(db|db-shm|db-wal|sqlite|sqlite3|env|log|bat|ps1|md)$/.test(p) ||
+        p === '/package-lock.json';
+    if (deny) return res.status(404).json({ error: 'Not found' });
+    next();
+});
+
 app.use(express.static(__dirname));
 
 // ===== DATABASE SETUP (PostgreSQL) =====
@@ -912,14 +923,23 @@ app.post('/api/admin/restore', async (req, res) => {
     }
 });
 
-// Health check
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
-        db: !!pool, 
+// Health check (pings the database for real, not just checks the env var)
+app.get('/health', async (req, res) => {
+    const health = {
+        status: 'ok',
+        db: false,
         databaseUrl: !!process.env.DATABASE_URL,
-        timestamp: new Date().toISOString() 
-    });
+        dbError: null,
+        timestamp: new Date().toISOString()
+    };
+    try {
+        await pool.query('SELECT 1');
+        health.db = true;
+    } catch (err) {
+        health.status = 'degraded';
+        health.dbError = err.code ? `${err.code}: ${err.message}` : (err.message || String(err));
+    }
+    res.json(health);
 });
 
 // Serve HTML pages
