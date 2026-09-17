@@ -294,6 +294,8 @@ function showTab(tabName) {
     document.getElementById('settingsTab').classList.add('hidden');
     const usersTab = document.getElementById('usersTab');
     if (usersTab) usersTab.classList.add('hidden');
+    const notifTab = document.getElementById('notificationsTab');
+    if (notifTab) notifTab.classList.add('hidden');
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     const tabs = document.querySelectorAll('.tab-btn');
     if (tabName === 'requests') {
@@ -307,10 +309,66 @@ function showTab(tabName) {
         document.getElementById('settingsTab').classList.remove('hidden');
         if (tabs[2]) tabs[2].classList.add('active');
         loadSettingsData();
+    } else if (tabName === 'notifications') {
+        if (notifTab) notifTab.classList.remove('hidden');
+        if (tabs[3]) tabs[3].classList.add('active');
+        loadNotificationsData();
     }
 }
 
 function showSettings() { showTab('settings'); }
+
+// ===== NOTIFICATIONS STATUS TAB =====
+function notifConfigBadge(elId, configured, okText, failText) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.textContent = configured ? okText : failText;
+    el.className = 'status-badge ' + (configured ? 'approved' : 'rejected');
+}
+
+function notifEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function loadNotificationsData() {
+    try {
+        const d = await apiGet('/api/admin/notifications/status');
+        // Statistik
+        const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+        setNum('notifEmailSent', d.summary.email.sent);
+        setNum('notifEmailFailed', d.summary.email.failed);
+        setNum('notifSmsSent', d.summary.sms.sent);
+        setNum('notifSmsFailed', d.summary.sms.failed);
+        // Konfigurasi
+        notifConfigBadge('notifEmailConfig', d.config.email.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
+        notifConfigBadge('notifSmsConfig', d.config.sms.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
+        const hostEl = document.getElementById('notifEmailHost');
+        if (hostEl) hostEl.textContent = `${d.config.email.host}:${d.config.email.port} (${d.config.email.user || 'tiada akaun'})`;
+        const hint = document.getElementById('notifConfigHint');
+        if (hint) {
+            const tips = [];
+            if (!d.config.email.configured) tips.push('📧 Isikan EMAIL_USER & EMAIL_PASS (Gmail App Password) dalam environment');
+            if (!d.config.sms.configured) tips.push('📱 Isikan TWILIO_SID, TWILIO_AUTH_TOKEN & TWILIO_PHONE_NUMBER untuk SMS');
+            hint.textContent = tips.join(' · ') || '✅ Semua saluran notifikasi telah dikonfigurasi.';
+        }
+        // Senarai terkini
+        const list = document.getElementById('notifRecentList');
+        if (!list) return;
+        if (!d.recent || d.recent.length === 0) {
+            list.innerHTML = '<div class="empty-state"><div class="empty-icon">📢</div><p>Tiada notifikasi lagi. Notifikasi dijana semasa permohonan diluluskan atau ditolak.</p></div>';
+            return;
+        }
+        list.innerHTML = d.recent.map(n => {
+            const icon = n.type === 'email' ? '📧' : '📱';
+            const badge = n.status === 'sent' ? '<span class="status-badge approved">Berjaya</span>' : '<span class="status-badge rejected">Gagal</span>';
+            const err = n.status !== 'sent' && n.error ? `<div class="notif-error">Sebab: ${notifEsc(n.error).substring(0, 120)}</div>` : '';
+            const when = n.created_at ? new Date(n.created_at).toLocaleString('ms-MY') : '';
+            return `<div class="request-item"><div class="req-header"><span class="req-name">${icon} ${notifEsc(n.type)} → ${notifEsc(n.recipient)}</span>${badge}</div>${err}<div class="req-meta">${notifEsc(when)}</div></div>`;
+        }).join('');
+    } catch (e) {
+        showToast('Ralat memuatkan status notifikasi: ' + e.message, 'error');
+    }
+}
 
 // ===== SETTINGS =====
 async function loadSettingsData() {

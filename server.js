@@ -62,6 +62,25 @@ function requireUser(req, res, next) {
     next();
 }
 
+// Pemilik permohonan ATAU admin — untuk endpoint yang portal pengguna guna pada rekod sendiri
+async function requireOwnerOrAdmin(req, res, next) {
+    const adminP = getAdminPayload(req);
+    if (adminP) { req.admin = adminP; return next(); }
+    const userP = getUserPayload(req);
+    if (!userP) return res.status(401).json({ error: 'Sila log masuk untuk meneruskan.' });
+    try {
+        const request = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
+        if (!request) return res.status(404).json({ error: 'Permohonan tidak ditemui' });
+        const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(userP.id);
+        const isOwner = request.user_id === userP.id || (user && request.no_hp === user.no_hp);
+        if (!isOwner) return res.status(403).json({ error: 'Akses hanya kepada pemilik permohonan ini.' });
+        req.user = userP;
+        next();
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+}
+
 function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
     return salt + ':' + crypto.scryptSync(String(pw), salt, 64).toString('hex');
 }
@@ -332,7 +351,7 @@ function errMsg(error) {
 // ===== API ROUTES =====
 
 // Get all requests
-app.get('/api/requests', async (req, res) => {
+app.get('/api/requests', requireAdmin, async (req, res) => {
     try {
         const { status } = req.query;
         let requests;
@@ -360,7 +379,7 @@ app.get('/api/requests/mine', requireUser, async (req, res) => {
 });
 
 // Get single request
-app.get('/api/requests/:id', async (req, res) => {
+app.get('/api/requests/:id', requireOwnerOrAdmin, async (req, res) => {
     try {
         const request = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         
@@ -453,7 +472,7 @@ app.post('/api/requests', requireUser, async (req, res) => {
 });
 
 // Update request
-app.put('/api/requests/:id', async (req, res) => {
+app.put('/api/requests/:id', requireOwnerOrAdmin, async (req, res) => {
     try {
         const { nama, jawatan, no_hp, email, no_plate, tujuan, tarikh_bertolak, tarikh_kembali, odo_sebelum, odo_selepas } = req.body;
         
@@ -550,7 +569,7 @@ app.put('/api/requests/:id/reject', requireAdmin, async (req, res) => {
 });
 
 // Return vehicle (user updates odo_selepas and marks as completed)
-app.put('/api/requests/:id/return', async (req, res) => {
+app.put('/api/requests/:id/return', requireOwnerOrAdmin, async (req, res) => {
     try {
         const { odo_selepas } = req.body;
 
@@ -607,7 +626,7 @@ app.delete('/api/requests/:id', requireAdmin, async (req, res) => {
 });
 
 // Get statistics
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT
@@ -632,7 +651,7 @@ app.get('/api/stats', async (req, res) => {
 });
 
 // Get notifications log
-app.get('/api/notifications', async (req, res) => {
+app.get('/api/notifications', requireAdmin, async (req, res) => {
     try {
         const { request_id } = req.query;
         let notificationsList;
@@ -719,6 +738,44 @@ app.put('/api/admin/reset-password', requireAdmin, async (req, res) => {
             success: true,
             message: 'Kata laluan berjaya direset ke lalai',
             default_password: 'admin123'
+        });
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+});
+
+// Status notifikasi: konfigurasi email/SMS + ringkasan kejayaan penghantaran
+app.get('/api/admin/notifications/status', requireAdmin, async (req, res) => {
+    try {
+        const rows = await db.prepare('SELECT type, status, COUNT(*) AS n FROM notifications GROUP BY type, status').all();
+        const summary = { email: { sent: 0, failed: 0 }, sms: { sent: 0, failed: 0 } };
+        for (const r of rows) {
+            const t = (r.type || '').toLowerCase();
+            if (summary[t] && (r.status === 'sent' || r.status === 'failed')) summary[t][r.status] = parseInt(r.n);
+        }
+        const recentRows = await db.prepare('SELECT id, type, recipient, status, error_message, created_at FROM notifications ORDER BY id DESC LIMIT 15').all();
+        const recent = recentRows.map(r => ({
+            type: r.type,
+            recipient: r.recipient,
+            status: r.status,
+            error: r.error_message,
+            created_at: r.created_at
+        }));
+        res.json({
+            config: {
+                email: {
+                    configured: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS &&
+                        process.env.EMAIL_USER !== 'your-email@gmail.com' && process.env.EMAIL_PASS !== 'your-app-password'),
+                    host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+                    port: process.env.EMAIL_PORT || '587',
+                    user: process.env.EMAIL_USER || ''
+                },
+                sms: {
+                    configured: !!(process.env.TWILIO_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER)
+                }
+            },
+            summary,
+            recent
         });
     } catch (error) {
         res.status(500).json({ error: errMsg(error) });

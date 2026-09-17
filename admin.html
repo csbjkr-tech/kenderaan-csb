@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Token sesi disuntik server semasa hidup => dapatkan token admin sebelum JS lain berjalan -->
     <meta name="csrf-token" content="__ADMIN_TOKEN__">
-    <link rel="stylesheet" href="style.css?v=audit2">
+    <link rel="stylesheet" href="style.css?v=audit3">
 </head>
 <body>
     <div class="container">
@@ -89,6 +89,7 @@
                 <button class="tab-btn active" onclick="showTab('requests')">📋 Permohonan</button>
                 <button class="tab-btn" onclick="showTab('users')">👥 Pengguna</button>
                 <button class="tab-btn" onclick="showTab('settings')">⚙️ Tetapan</button>
+                <button class="tab-btn" onclick="showTab('notifications')">📢 Notifikasi</button>
             </div>
             
             <!-- Requests Tab -->
@@ -232,6 +233,55 @@
                 </div>
             </div>
             
+            <!-- Notifications Status Tab -->
+            <div id="notificationsTab" class="tab-content hidden">
+                <div class="stats-container">
+                    <div class="stat-card" style="border-top-color:#2196F3">
+                        <div class="stat-number" id="notifEmailSent" style="color:#2196F3">0</div>
+                        <div class="stat-label">Emel Berjaya</div>
+                    </div>
+                    <div class="stat-card rejected">
+                        <div class="stat-number" id="notifEmailFailed">0</div>
+                        <div class="stat-label">Emel Gagal</div>
+                    </div>
+                    <div class="stat-card" style="border-top-color:#9C27B0">
+                        <div class="stat-number" id="notifSmsSent" style="color:#9C27B0">0</div>
+                        <div class="stat-label">SMS Berjaya</div>
+                    </div>
+                    <div class="stat-card rejected">
+                        <div class="stat-number" id="notifSmsFailed">0</div>
+                        <div class="stat-label">SMS Gagal</div>
+                    </div>
+                </div>
+                
+                <div class="settings-card" style="margin-bottom:15px">
+                    <h3>🔌 Status Konfigurasi</h3>
+                    <div class="security-info">
+                        <div class="info-item">
+                            <span class="info-label">📧 Emel (SMTP):</span>
+                            <span id="notifEmailConfig" class="status-badge pending">Menyemak...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">📱 SMS (Twilio):</span>
+                            <span id="notifSmsConfig" class="status-badge pending">Menyemak...</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">🖥️ Pelayan SMTP:</span>
+                            <span id="notifEmailHost">-</span>
+                        </div>
+                    </div>
+                    <p id="notifConfigHint" style="color:#666;font-size:0.9em;margin-top:10px"></p>
+                </div>
+                
+                <h3 style="margin:15px 0 10px">📜 15 Penghantaran Terkini</h3>
+                <div id="notifRecentList" class="requests-list">
+                    <div class="empty-state">
+                        <div class="empty-icon">📢</div>
+                        <p>Tiada notifikasi lagi. Notifikasi dijana semasa permohonan diluluskan atau ditolak.</p>
+                    </div>
+                </div>
+            </div>
+            
             <div class="footer">
                 <p>© 2024 Sistem Penggunaan Kenderaan | Cawangan Senggara Bangunan</p>
                 <p class="footer-org">Jabatan Kerja Raya Sabah</p>
@@ -296,6 +346,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=audit2"></script>
+    <script src="script.js?v=audit3"></script>
 </body>
 </html>
