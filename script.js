@@ -370,6 +370,30 @@ async function loadNotificationsData() {
     }
 }
 
+async function sendTestNotification(channel) {
+    const resultBox = document.getElementById('notifTestResult');
+    if (!resultBox) return;
+    const recipient = (document.getElementById('notifTestRecipient') || {}).value || '';
+    resultBox.classList.remove('hidden');
+    resultBox.style.background = '#fff3e0';
+    resultBox.style.color = '#b26a00';
+    resultBox.textContent = '⏳ Menghantar ' + (channel === 'email' ? 'emel' : 'SMS') + ' ujian...';
+    try {
+        const r = await apiPost('/api/admin/notifications/test', { channel, recipient });
+        const res = (r.results && r.results[channel]) || {};
+        const ok = !!res.success;
+        resultBox.style.background = ok ? '#e8f5e9' : '#ffebee';
+        resultBox.style.color = ok ? '#2e7d32' : '#c62828';
+        resultBox.textContent = ok
+            ? `✅ ${channel === 'email' ? 'Emel' : 'SMS'} ujian berjaya dihantar kepada ${res.to || '-'}${res.messageId ? ' (ID: ' + res.messageId + ')' : ''}${res.sid ? ' (SID: ' + res.sid + ')' : ''}`
+            : `❌ Gagal: ${res.error || 'tidak diketahui'}`;
+    } catch (e) {
+        resultBox.style.background = '#ffebee';
+        resultBox.style.color = '#c62828';
+        resultBox.textContent = '❌ ' + e.message;
+    }
+}
+
 // ===== SETTINGS =====
 async function loadSettingsData() {
     const username = localStorage.getItem('adminName');

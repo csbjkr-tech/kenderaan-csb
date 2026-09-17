@@ -668,6 +668,39 @@ app.get('/api/notifications', requireAdmin, async (req, res) => {
     }
 });
 
+// Uji hantar notifikasi (emel/SMS ujian tanpa permohonan sebenar)
+app.post('/api/admin/notifications/test', requireAdmin, async (req, res) => {
+    try {
+        const { channel = 'both', recipient } = req.body || {};
+        const results = {};
+        const testReq = {
+            id: 'test',
+            nama: 'Pentadbir Sistem',
+            no_plate: 'UJI 000 X',
+            tarikh_bertolak: new Date().toISOString().split('T')[0],
+            tarikh_kembali: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+            tujuan: 'Ujian penghantaran daripada Panel Admin',
+            admin_notes: ''
+        };
+        if (channel === 'email' || channel === 'both') {
+            let to = (recipient && recipient.includes('@')) ? recipient.trim() : '';
+            if (!to && process.env.EMAIL_USER && process.env.EMAIL_USER !== 'your-email@gmail.com') to = process.env.EMAIL_USER;
+            if (!to) return res.status(400).json({ error: 'Tiada alamat emel sasaran. Isi kredensial EMAIL_USER dahulu atau nyatakan alamat.' });
+            results.email = { to, ...(await notifications.sendEmail(to, '✅ Emel Ujian - Sistem Penggunaan Kenderaan', notifications.generateApprovalEmail(testReq))) };
+        }
+        if (channel === 'sms' || channel === 'both') {
+            let to = (recipient && /^\+?\d+$/.test(recipient)) ? recipient.trim() : '';
+            if (to && to.startsWith('0')) to = '+60' + to.substring(1);
+            if (!to) to = process.env.TWILIO_PHONE_NUMBER || '';
+            if (!to) return res.status(400).json({ error: 'Tiada nombor SMS sasaran. Nyatakan nombor (contoh: 0123456789) atau isi TWILIO_PHONE_NUMBER.' });
+            results.sms = { to, ...(await notifications.sendSMS(to, notifications.generateApprovalSMS(testReq))) };
+        }
+        res.json({ success: true, results });
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+});
+
 // ===== AUTHENTICATION =====
 app.post('/api/login', async (req, res) => {
     try {

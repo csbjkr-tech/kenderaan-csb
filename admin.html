@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Token sesi disuntik server semasa hidup => dapatkan token admin sebelum JS lain berjalan -->
     <meta name="csrf-token" content="__ADMIN_TOKEN__">
-    <link rel="stylesheet" href="style.css?v=audit3">
+    <link rel="stylesheet" href="style.css?v=audit4">
 </head>
 <body>
     <div class="container">
@@ -273,6 +273,17 @@
                     <p id="notifConfigHint" style="color:#666;font-size:0.9em;margin-top:10px"></p>
                 </div>
                 
+                <div class="settings-card" style="margin-bottom:15px">
+                    <h3>🧪 Uji Penghantaran</h3>
+                    <p style="color:#666;margin-bottom:10px">Hantar emel/SMS ujian tanpa perlu luluskan permohonan sebenar. Kosongkan ruangan untuk hantar kepada diri sendiri.</p>
+                    <div class="danger-actions" style="flex-wrap:wrap;gap:8px;align-items:center">
+                        <input type="text" id="notifTestRecipient" placeholder="Alamat emel / no. telefon (pilihan)" style="flex:1;min-width:220px;padding:8px;border:1px solid #ddd;border-radius:8px">
+                        <button class="btn btn-primary btn-sm" onclick="sendTestNotification('email')">📧 Uji Emel</button>
+                        <button class="btn btn-primary btn-sm" onclick="sendTestNotification('sms')">📱 Uji SMS</button>
+                    </div>
+                    <div id="notifTestResult" class="hidden" style="margin-top:10px;padding:10px;border-radius:8px;font-size:0.9em"></div>
+                </div>
+                
                 <h3 style="margin:15px 0 10px">📜 15 Penghantaran Terkini</h3>
                 <div id="notifRecentList" class="requests-list">
                     <div class="empty-state">
@@ -346,6 +357,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=audit3"></script>
+    <script src="script.js?v=audit4"></script>
 </body>
 </html>
