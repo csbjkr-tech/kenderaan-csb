@@ -98,7 +98,9 @@ async function apiPut(endpoint, data = null) {
     const response = await fetch(`${API_URL}${endpoint}`, options);
     if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Ralat semasa mengemas kini data');
+        const err = new Error(error.error || 'Ralat semasa mengemas kini data');
+        err.payload = error; // bawa payload penuh (contoh: objek konflik 409)
+        throw err;
     }
     return response.json();
 }
@@ -788,6 +790,86 @@ function adminPrompt(message, defaultValue = '', opts = {}) {
     return openActionModal({ message, input: true, inputValue: defaultValue, ...opts });
 }
 
+// ===== KOTAK KONFLIK TEMPAAHAN (kelulusan ditolak 409 oleh server) =====
+function showConflictModal(requestId, konflik) {
+    return new Promise(async resolve => {
+        let req = {};
+        try { req = await apiGet(`/api/requests/${requestId}`); } catch (_) { /* teruskan dengan data konflik sahaja */ }
+        req = (req && (req.request || req)) || {};
+
+        // Kira jurang kosong pertama untuk plat ini (semua tempahan approved, sisih ikut tarikh)
+        let sugFrom, sugTo;
+        try {
+            const all = await apiGet('/api/requests?status=approved');
+            const rows = (Array.isArray(all) ? all : (all.requests || []))
+                .filter(r => (r.no_plate || '').toUpperCase() === (req.no_plate || '').toUpperCase() && r.id !== requestId)
+                .map(r => ({ a: r.tarikh_bertolak, b: r.tarikh_kembali }))
+                .sort((x, y) => x.a.localeCompare(y.a));
+            const dur = Math.max(1, Math.round((new Date(req.tarikh_kembali) - new Date(req.tarikh_bertolak)) / 86400000) + 1);
+            // GUNA UTC MURNI (T00:00:00Z) — tanpa 'Z', Date mengikut zon lokal dan toISOString
+            // lari satu hari di zon UTC+8 (punca cadangan tak lompat betul)
+            let cursor = new Date(req.tarikh_bertolak + 'T00:00:00Z'); // mula dari tarikh asal pemohon
+            for (const iv of rows) { // lompat setiap tempahan yang bertindih dengan cursor
+                const cISO = cursor.toISOString().split('T')[0];
+                if (cISO <= iv.b) cursor = new Date(new Date(iv.b + 'T00:00:00Z').getTime() + 86400000);
+            }
+            sugFrom = cursor;
+            sugTo = new Date(sugFrom); sugTo.setDate(sugTo.getDate() + dur - 1);
+        } catch (_) {
+            const d = Math.max(1, Math.round((new Date(req.tarikh_kembali) - new Date(req.tarikh_bertolak)) / 86400000) + 1) || 1;
+            sugFrom = new Date((konflik.tarikh_kembali || req.tarikh_bertolak) + 'T00:00:00Z'); sugFrom.setUTCDate(sugFrom.getUTCDate() + 1);
+            sugTo = new Date(sugFrom); sugTo.setUTCDate(sugTo.getUTCDate() + d - 1);
+        }
+        const iso = d => d.toISOString().split('T')[0];
+
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000';
+        overlay.innerHTML = `
+            <div style="background:#fff;border-radius:12px;max-width:440px;width:92%;padding:22px;font-family:inherit;box-shadow:0 10px 40px rgba(0,0,0,0.25)">
+                <h3 style="margin:0 0 6px;color:#e65100">⚠️ Tempahan Bertindih</h3>
+                <p style="margin:0 0 10px;color:#444;font-size:0.92em">
+                    Kenderaan <strong>${req.no_plate || ''}</strong> telah diluluskan untuk
+                    <strong>${konflik.nama || '-'}</strong>${konflik.no_hp ? ` (${konflik.no_hp})` : ''}:<br>
+                    📅 <strong>${konflik.tarikh_bertolak || '-'}</strong> hingga <strong>${konflik.tarikh_kembali || '-'}</strong>
+                </p>
+                <p style="margin:0 0 12px;color:#666;font-size:0.88em">
+                    Permohonan ini (${req.nama || '-'}): ${req.tarikh_bertolak || '-'} hingga ${req.tarikh_kembali || '-'}.
+                    Cadangan tarikh baharu diprapisi di bawah — boleh diubah:
+                </p>
+                <div style="display:flex;gap:8px;margin-bottom:14px">
+                    <label style="flex:1;font-size:0.85em;color:#555">Bertolak
+                        <input type="date" id="konflikFrom" value="${iso(sugFrom)}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;margin-top:4px">
+                    </label>
+                    <label style="flex:1;font-size:0.85em;color:#555">Kembali
+                        <input type="date" id="konflikTo" value="${iso(sugTo)}" style="width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;margin-top:4px">
+                    </label>
+                </div>
+                <div style="display:flex;gap:8px;justify-content:flex-end">
+                    <button id="konflikBatal" class="btn" style="background:#eee;color:#333">Batal</button>
+                    <button id="konflikOk" class="btn btn-success">📅 Pindahkan &amp; Luluskan</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const close = () => { overlay.remove(); resolve(); };
+        overlay.querySelector('#konflikBatal').onclick = close;
+        overlay.querySelector('#konflikOk').onclick = async () => {
+            const from = overlay.querySelector('#konflikFrom').value;
+            const to = overlay.querySelector('#konflikTo').value;
+            if (!from || !to || from > to) { showToast('Tarikh tidak sah — semak semula', 'error'); return; }
+            // bantuan kecil: sahkan semula melalui server (approve akan 409 lagi kalau masih bertindih)
+            try {
+                await apiPut(`/api/requests/${requestId}`, { tarikh_bertolak: from, tarikh_kembali: to });
+                await apiPut(`/api/requests/${requestId}/approve`);
+                close();
+                await loadAdminData();
+                showToast(`✅ Tarikh dipindahkan (${from} hingga ${to}) & diluluskan`);
+            } catch (e) {
+                showToast('Ralat: ' + e.message, 'error');
+            }
+        };
+    });
+}
+
 // ===== TOAST NOTIFICATION (ganti alert untuk mesej ringkas) =====
 function showToast(message, type = 'success') {
     const toast = document.createElement('div');
@@ -801,7 +883,17 @@ function showToast(message, type = 'success') {
 async function approveRequest(id) {
     const ok = await adminConfirm('Luluskan permohonan ini? Notifikasi emel akan dihantar kepada pengguna.', { title: '✅ Kelulusan Permohonan', okText: '✅ Ya, Luluskan', danger: false });
     if (!ok) return;
-    try { await apiPut(`/api/requests/${id}/approve`); await loadAdminData(); showToast('✅ Permohonan diluluskan'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
+    try {
+        await apiPut(`/api/requests/${id}/approve`);
+        await loadAdminData();
+        showToast('✅ Permohonan diluluskan');
+    } catch (e) {
+        if (e.payload && e.payload.konflik) {
+            await showConflictModal(id, e.payload.konflik); // kotak khusus: nama pemegang, tarikh, pindah & lulus
+            return;
+        }
+        showToast('Ralat: ' + e.message, 'error');
+    }
 }
 
 async function rejectRequest(id) {

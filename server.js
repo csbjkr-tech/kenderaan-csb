@@ -79,6 +79,9 @@ async function requireOwnerOrAdmin(req, res, next) {
         const request = await db.prepare('SELECT * FROM requests WHERE id = $1').get(req.params.id);
         if (!request) return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         const user = await db.prepare('SELECT * FROM users WHERE id = $1').get(userP.id);
+        // Token pengguna lama (rekod dipadam) tidak lagi berhak — admin masih boleh lulus melalui Bearer
+        // (pengesahan admin dilakukan oleh requireAdmin sebelum panggilan ini dalam aliran panel)
+        if (!user) return res.status(403).json({ error: 'Akaun pengguna tidak lagi wujud.' });
         const isOwner = request.user_id === userP.id || (user && request.no_hp === user.no_hp);
         if (!isOwner) return res.status(403).json({ error: 'Akses hanya kepada pemilik permohonan ini.' });
         req.user = userP;
