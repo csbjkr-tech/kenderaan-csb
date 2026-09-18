@@ -1,6 +1,8 @@
 # 🚗 Sistem Penggunaan Kenderaan — Cawangan Senggara Bangunan
 
 > **Jabatan Kerja Raya Sabah** | Cawangan Senggara Bangunan
+>
+> ✅ **STATUS: SIAP & DIGUNAKAN SECARA SEBENAR (2026-09-18)** — production aktif di Railway, notifikasi emel Brevo terbukti sampai ke inbox pengguna, keselamatan terkunci penuh. Dokumen ini ialah rujukan rasmi untuk penyelenggaraan masa depan.
 
 ---
 
@@ -118,6 +120,8 @@ Status: completed (Selesai)
 ├── .env                   # Konfigurasi sebenar (RAHSIA — di-ignore git)
 ├── .env.example           # Templat konfigurasi untuk salin
 ├── QR CSB-KENDERAAN.png   # Aset QR code portal
+├── CSB LOGO-512.png       # Logo CSB (halaman)
+├── logo-jkr-sabah.png     # Logo JKR Sabah (halaman)
 └── .freebuff/             # Tooling preview (preview-launch.js, run.md)
 ```
 
