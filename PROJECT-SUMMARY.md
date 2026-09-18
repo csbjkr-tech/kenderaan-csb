@@ -72,10 +72,12 @@ Status: completed (Selesai)
 - Eksport data CSV
 - **Backup & Restore** data (JSON) — penting untuk pemindahan data
 - **Tab 📢 Notifikasi** — status konfigurasi emel, statistik penghantaran, log + butang Uji Emel
+- **⚠️ Modal konflik tempahan** — bila kelulusan ditolak kerana tarikh bertindih (`409`), panel papar kotak khusus: plat kenderaan, **nama pemegang + no. telefon**, tarikh kedua-dua tempahan, **cadangan tarikh kosong diprapisi** (melompat semua tempahan diluluskan plat itu) + butang **Pindahkan & Luluskan** satu klik
 - **Zon bahaya** (padam data, reset kata laluan)
 
 ### Ketahanan Sistem
 - **Anti-duplicate 3 lapisan** — (1) memory 5s, (2) semakan DB permohonan PENDING sama (plat+telefon+tarikh) dalam 24 jam → `409`, (3) **partial unique index PostgreSQL** `(no_hp, UPPER(no_plate), tarikh_bertolak) WHERE status='pending'` (atomik, race-condition-proof); duplicate legasi dibersihkan semasa boot supaya index pasti tercipta
+- **Sekatan double-booking** — semasa approve, server menyemak plat sama (tak kira huruf besar/kecil) sudah `approved` pada tarikh **bertindih** → tolak `409` dengan objek `konflik` (id, nama, telefon, tarikh pemegang); satu kenderaan = satu hari = satu pengguna, dilindungi sistem (bukan ingatan admin)
 - **Health check sebenar** — `/health` melakukan ping database (`SELECT 1`), bukan sekadar semak variable; melaporkan `dbError` yang jelas bila gagal
 - **Banner "Database tidak tersedia"** — bila DB down, pengguna nampak mesej mesra dengan butang 🔄 **Cuba Semula** (bukan error kosong), di panel admin, portal pengguna, dan semasa hantar permohonan (data borang tidak hilang)
 - Server tetap hidup dalam mod **DEGRADED** walaupun database gagal — halaman web masih boleh diakses
@@ -271,6 +273,8 @@ Hasil yang diharap: `{"status":"ok","db":true,...}` — admin `admin`/`admin123`
 | 2026-09-18 | **dotenv** — server auto-load `.env`; guard `PORT=0` rosak dari env mesin; fail legasi SQLite dipadam |
 | 2026-09-18 | **Emel production aktif** — Brevo API HTTP: kunci diset, IP keluar Railway dibenarkan, emel sebenar terhantar ke inbox (terbukti) |
 | 2026-09-18 | **Keputusan reka bentuk: emel sahaja** — Twilio/SMS dibuang sepenuhnya (kod, dependency, UI); **audit kod lapuk**: skrip tunnel/bat, DB SQLite kedua, salinan legasi dokumen & log lama dibuang |
+| 2026-09-18 | **Sekatan konflik tempahan (double-booking)** — approve menyemak plat sama bertindih tarikh → `409` + objek konflik (pemegang, telefon, tarikh); diuji hujung-ke-hujung di production dengan data ujian yang dibersihkan selepasnya |
+| 2026-09-18 | **Modal konflik panel admin** — kotak khusus 409: pemegang + tarikh, cadangan tarikh kosong pertama (lompat semua tempahan plat, kiraan **UTC murni** — fix bug zon waktu `toISOString` lari sehari di UTC+8) + butang **Pindahkan & Luluskan**; dibaiki: middleware tak lagi menolak token admin apabila token pengguna stale wujud |
 
 ---
 
