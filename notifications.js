@@ -234,6 +234,51 @@ function generateRejectionEmail(request) {
     `;
 }
 
+// Templat emel pautan reset kata laluan (pautan sekali guna, sah terhad)
+function generatePasswordResetEmail({ nama, resetUrl, expiryHours = 1 }) {
+    return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0; }
+                .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; }
+                .footer { background: #eee; padding: 15px; text-align: center; font-size: 12px; border-radius: 0 0 10px 10px; }
+                .btn { display: inline-block; background: #1e3c72; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 15px 0; }
+                .warning { background: #fff3e0; padding: 15px; border-left: 4px solid #ff9800; margin-top: 15px; font-size: 14px; }
+                .fallback { font-size: 12px; color: #666; word-break: break-all; background: #fff; padding: 10px; border: 1px solid #ddd; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>🔑 Reset Kata Laluan</h1>
+                </div>
+                <div class="content">
+                    <p>Tuan/Puan <strong>${nama}</strong>,</p>
+                    <p>Kami terima permintaan untuk menetapkan semula kata laluan akaun anda dalam Sistem Penggunaan Kenderaan. Klik butang di bawah untuk meneruskan:</p>
+                    <p style="text-align:center">
+                        <a href="${resetUrl}" class="btn">🔑 Tetapkan Kata Laluan Baharu</a>
+                    </p>
+                    <p>Pautan ini <strong>sah selama ${expiryHours} jam</strong> dan <strong>boleh digunakan sekali sahaja</strong>.</p>
+                    <div class="warning">
+                        <strong>⚠️ Penting:</strong> Jika tuan <em>tidak</em> meminta reset ini, abaikan emel ini — kata laluan semasa kekal selamat dan tiada perubahan dibuat.
+                    </div>
+                    <p style="margin-top:15px">Butang tak berfungsi? Salin pautan ini ke pelayar:</p>
+                    <p class="fallback">${resetUrl}</p>
+                </div>
+                <div class="footer">
+                    <p>Sistem Penggunaan Kenderaan - Cawangan Senggara Bangunan</p>
+                    <p>Emel ini dijana secara automatik. Sila jangan balas emel ini.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+}
+
 function formatDate(dateStr) {
     const options = { day: 'numeric', month: 'short', year: 'numeric' };
     return new Date(dateStr).toLocaleDateString('ms-MY', options);
@@ -303,5 +348,6 @@ module.exports = {
     isEmailConfigured,
     getEmailProvider,
     generateApprovalEmail,
-    generateRejectionEmail
+    generateRejectionEmail,
+    generatePasswordResetEmail
 };

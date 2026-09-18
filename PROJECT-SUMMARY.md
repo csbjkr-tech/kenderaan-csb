@@ -64,6 +64,7 @@ Status: completed (Selesai)
 - Auto-isi borang dari profil
 - Pantau status permohonan sendiri
 - Kembalikan kenderaan dengan bacaan odometer
+- **Set semula kata laluan sendiri** — pautan "Lupa kata laluan?" → emel pautan reset (sah 1 jam, sekali guna) → modal kata laluan baharu; tanpa perlu admin
 
 ### Panel Admin
 - Semak, luluskan, tolak permohonan (dengan notifikasi automatik)
@@ -139,7 +140,7 @@ Status: completed (Selesai)
   DATABASE_URL=${{Postgres.DATABASE_URL}}
   ```
 - Data kekal merentas deploy melalui volume `postgres-volume`
-- Tables (`requests`, `admins`, `users`, `notifications`) dicipta automatik semasa server mula
+- Tables (`requests`, `admins`, `users`, `notifications`, `password_resets`) dicipta automatik semasa server mula
 
 ### Lokal (development)
 - PostgreSQL 18 berjalan sebagai servis Windows (port 5432)
@@ -201,6 +202,8 @@ Status: completed (Selesai)
 | `POST` | `/api/login` | Log masuk admin |
 | `POST` | `/api/users/register` | Daftar pengguna baru |
 | `POST` | `/api/users/login` | Log masuk pengguna |
+| `POST` | `/api/users/forgot-password` | Minta pautan reset (emel; anti-enumeration; 3/jam) |
+| `POST` | `/api/users/reset-password` | Tukar kata laluan dengan token emel (sekali guna, sah 1 jam) |
 | `GET` | `/api/users` | Senarai pengguna (admin) |
 | `GET` | `/api/users/stats` | Statistik pengguna |
 | `PUT` | `/api/users/:id/toggle` | Aktif/nyahaktif pengguna |
@@ -273,6 +276,7 @@ Hasil yang diharap: `{"status":"ok","db":true,...}` — admin `admin`/`admin123`
 | 2026-09-18 | **dotenv** — server auto-load `.env`; guard `PORT=0` rosak dari env mesin; fail legasi SQLite dipadam |
 | 2026-09-18 | **Emel production aktif** — Brevo API HTTP: kunci diset, IP keluar Railway dibenarkan, emel sebenar terhantar ke inbox (terbukti) |
 | 2026-09-18 | **Keputusan reka bentuk: emel sahaja** — Twilio/SMS dibuang sepenuhnya (kod, dependency, UI); **audit kod lapuk**: skrip tunnel/bat, DB SQLite kedua, salinan legasi dokumen & log lama dibuang |
+| 2026-09-18 | **Reset kata laluan sendiri** — pautan emel (token hash SHA-256 dalam DB, sekali guna, sah 1 jam, anti-enumeration, rate limit 3/jam); modal UI di portal pengguna; jadual `password_resets` baharu |
 | 2026-09-18 | **Sekatan konflik tempahan (double-booking)** — approve menyemak plat sama bertindih tarikh → `409` + objek konflik (pemegang, telefon, tarikh); diuji hujung-ke-hujung di production dengan data ujian yang dibersihkan selepasnya |
 | 2026-09-18 | **Modal konflik panel admin** — kotak khusus 409: pemegang + tarikh, cadangan tarikh kosong pertama (lompat semua tempahan plat, kiraan **UTC murni** — fix bug zon waktu `toISOString` lari sehari di UTC+8) + butang **Pindahkan & Luluskan**; dibaiki: middleware tak lagi menolak token admin apabila token pengguna stale wujud |
 

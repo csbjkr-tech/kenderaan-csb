@@ -583,6 +583,109 @@ function resetUserForm() {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '📤 Hantar Permohonan'; }
 }
 
+// ===== RESET KATA LALUAN SENDIRI (pautan emel) =====
+function showForgotModal() {
+    document.getElementById('forgotStep1').classList.remove('hidden');
+    document.getElementById('forgotStep2').classList.add('hidden');
+    document.getElementById('forgotError').classList.add('hidden');
+    document.getElementById('forgotEmail').value = '';
+    const btn = document.getElementById('forgotSubmitBtn');
+    btn.disabled = false;
+    btn.innerHTML = '📧 Hantar Pautan';
+    document.getElementById('forgotModal').classList.remove('hidden');
+}
+
+function closeForgotModal() {
+    document.getElementById('forgotModal').classList.add('hidden');
+}
+
+async function submitForgot() {
+    const email = document.getElementById('forgotEmail').value.trim();
+    const errEl = document.getElementById('forgotError');
+    errEl.classList.add('hidden');
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errEl.textContent = 'Sila masukkan alamat emel yang sah.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    const btn = document.getElementById('forgotSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Menghantar...';
+    try {
+        const result = await apiPost('/api/users/forgot-password', { email });
+        // Tukar paparan modal kepada langkah "pautan dihantar" (mesej server sentiasa sama —
+        // reka bentuk anti-enumeration: tak mendedahkan sama ada emel berdaftar)
+        document.getElementById('forgotStep1').classList.add('hidden');
+        document.getElementById('forgotStep2').classList.remove('hidden');
+        const footerBtn = btn;
+        footerBtn.innerHTML = '✅ Dihantar';
+        footerBtn.disabled = true;
+    } catch (err) {
+        errEl.textContent = err.message || 'Ralat semasa menghantar. Sila cuba lagi.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = '📧 Hantar Pautan';
+    }
+}
+
+// Modal kata laluan baharu — dipanggil apabila halaman dibuka dengan ?reset=TOKEN dari emel
+let pendingResetToken = '';
+function showResetModal(token) {
+    pendingResetToken = token;
+    document.getElementById('newPassword1').value = '';
+    document.getElementById('newPassword2').value = '';
+    document.getElementById('resetError').classList.add('hidden');
+    document.getElementById('resetModal').classList.remove('hidden');
+    // Halang halaman di bahagian atas supaya modal jelas
+    window.scrollTo(0, 0);
+}
+
+function closeResetModal() {
+    document.getElementById('resetModal').classList.add('hidden');
+    pendingResetToken = '';
+}
+
+async function submitNewPassword() {
+    const p1 = document.getElementById('newPassword1').value;
+    const p2 = document.getElementById('newPassword2').value;
+    const errEl = document.getElementById('resetError');
+    errEl.classList.add('hidden');
+    if (p1.length < 6) {
+        errEl.textContent = 'Kata laluan mesti sekurang-kurangnya 6 aksara.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    if (p1 !== p2) {
+        errEl.textContent = 'Kata laluan tidak sepadan. Sila taip semula.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+    const btn = document.getElementById('resetSubmitBtn');
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Menyimpan...';
+    try {
+        await apiPost('/api/users/reset-password', { token: pendingResetToken, new_password: p1 });
+        closeResetModal();
+        // Papar mesej jaya dalam kotak log masuk
+        const loginEl = document.getElementById('loginError');
+        loginEl.style.color = '#2e7d32';
+        loginEl.style.borderColor = '#4CAF50';
+        loginEl.style.background = '#e8f5e9';
+        loginEl.textContent = '✅ Kata laluan berjaya ditukar! Sila log masuk dengan kata laluan baharu.';
+        loginEl.classList.remove('hidden');
+        setTimeout(() => {
+            loginEl.style.color = '';
+            loginEl.style.borderColor = '';
+            loginEl.style.background = '';
+        }, 15000);
+    } catch (err) {
+        errEl.textContent = err.message || 'Ralat semasa menetapkan kata laluan.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = '✅ Simpan Kata Laluan';
+    }
+}
+
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', function () {
     // Attach event listeners
@@ -591,6 +694,23 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const registerForm = document.getElementById('userRegisterForm');
     if (registerForm) registerForm.addEventListener('submit', handleUserRegister);
+
+    // Pautan reset dari emel: /user.html?reset=TOKEN -> buka modal kata laluan baharu
+    try {
+        const params = new URLSearchParams(location.search);
+        const resetToken = params.get('reset');
+        if (resetToken) {
+            showResetModal(resetToken);
+            // Buang parameter dari URL supaya token tak kekal dalam sejarah pelayar
+            history.replaceState(null, '', location.pathname);
+        }
+    } catch { /* abaikan */ }
+
+    // Tutup modal reset/forgot bila klik luar
+    ['forgotModal', 'resetModal'].forEach(id => {
+        const m = document.getElementById(id);
+        if (m) m.addEventListener('click', (e) => { if (e.target === m) m.classList.add('hidden'); });
+    });
 
     // Check if user is already logged in
     if (isUserLoggedIn()) {

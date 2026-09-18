@@ -277,6 +277,19 @@ async function initDatabase() {
         )
     `);
 
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        )
+    `);
+    // Buang token luput (kemas kini berkala semasa boot)
+    await db.prepare('DELETE FROM password_resets WHERE expires_at < $1').run(new Date().toISOString());
+
     console.log('✅ Tables created/verified');
 
     // Insert default admin if not exists
@@ -936,6 +949,80 @@ app.post('/api/users/register', registerLimiter, async (req, res) => {
         );
         
         res.status(201).json({ success: true, message: 'Pendaftaran berjaya', userId: result.rows[0].id });
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+});
+
+// ===== RESET KATA LALUAN SENDIRI (pautan emel, tanpa admin) =====
+const forgotLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyGen: (req) => `forgot:${clientIp(req)}`, message: 'Terlalu banyak permintaan reset kata laluan dari rangkaian ini. Sila cuba lagi nanti.' });
+
+// Langkah 1: pengguna hantar emel -> pautan reset dihantar (jika emel berdaftar)
+app.post('/api/users/forgot-password', forgotLimiter, async (req, res) => {
+    try {
+        const email = String(req.body.email || '').trim().toLowerCase();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ error: 'Sila masukkan alamat emel yang sah.' });
+        }
+
+        const user = await db.prepare('SELECT id, nama FROM users WHERE LOWER(email) = $1 AND is_active = 1').get(email);
+        if (user) {
+            const token = crypto.randomBytes(32).toString('hex');
+            const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+            const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // sah 1 jam
+            await db.prepare('INSERT INTO password_resets (user_id, token_hash, expires_at, created_at) VALUES ($1, $2, $3, $4)')
+                .run(user.id, tokenHash, expiresAt, new Date().toISOString());
+
+            const baseUrl = process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+            const resetUrl = `${baseUrl}/user.html?reset=${token}`;
+            const result = await notifications.sendEmail(
+                email,
+                '🔑 Reset Kata Laluan — Sistem Penggunaan Kenderaan',
+                notifications.generatePasswordResetEmail({ nama: user.nama, resetUrl, expiryHours: 1 })
+            );
+            if (!result.success) console.error('Reset email failed:', result.error);
+        }
+
+        // Sentiasa jawapan sama (dengan/sans emel berdaftar) — elak pengezanan akaun
+        res.json({ success: true, message: 'Jika emel itu berdaftar, pautan reset telah dihantar. Sila semak inbox atau folder spam.' });
+    } catch (error) {
+        res.status(500).json({ error: errMsg(error) });
+    }
+});
+
+// Langkah 2: pengguna klik pautan -> tukar kata laluan (token sekali guna, sah 1 jam)
+app.post('/api/users/reset-password', async (req, res) => {
+    try {
+        const token = String(req.body.token || '').trim();
+        const newPassword = String(req.body.new_password || '');
+
+        if (!/^[0-9a-f]{64}$/.test(token)) {
+            return res.status(400).json({ error: 'Pautan reset tidak sah. Sila minta pautan baharu.' });
+        }
+        if (newPassword.length < 6) {
+            return res.status(400).json({ error: 'Kata laluan mesti sekurang-kurangnya 6 aksara.' });
+        }
+
+        // Simpan HASH sahaja dalam DB — token sebenar hanya wujud dalam emel
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const row = await db.prepare('SELECT * FROM password_resets WHERE token_hash = $1 AND used = 0').get(tokenHash);
+        if (!row) {
+            return res.status(400).json({ error: 'Pautan reset tidak sah atau telah digunakan. Sila minta pautan baharu.' });
+        }
+        if (Date.now() > Date.parse(row.expires_at)) {
+            return res.status(400).json({ error: 'Pautan reset telah luput. Sila minta pautan baharu.' });
+        }
+
+        const user = await db.prepare('SELECT id FROM users WHERE id = $1 AND is_active = 1').get(row.user_id);
+        if (!user) {
+            return res.status(400).json({ error: 'Akaun tidak dijumpai atau tidak aktif.' });
+        }
+
+        await db.prepare('UPDATE users SET password = $1 WHERE id = $2').run(hashPassword(newPassword), user.id);
+        await db.prepare('UPDATE password_resets SET used = 1 WHERE id = $1').run(row.id);
+
+        console.log(`🔑 Password reset via email link (user id ${user.id})`);
+        res.json({ success: true, message: 'Kata laluan berjaya ditukar. Sila log masuk dengan kata laluan baharu.' });
     } catch (error) {
         res.status(500).json({ error: errMsg(error) });
     }

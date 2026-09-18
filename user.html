@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pengguna - Sistem Penggunaan Kenderaan</title>
-    <link rel="stylesheet" href="style.css?v=emailfix">
+    <link rel="stylesheet" href="style.css?v=resetpw">
 </head>
 <body>
     <div class="container">
@@ -53,6 +53,7 @@
                             </div>
                             <div id="loginError" class="error-message hidden"></div>
                             <button type="submit" class="btn btn-primary btn-full">Log Masuk</button>
+                            <p style="text-align:center;margin-top:12px"><a href="#" onclick="showForgotModal(); return false;" style="color:#1e3c72;font-size:0.9em">Lupa kata laluan?</a></p>
                         </form>
                     </div>
                 </div>
@@ -296,6 +297,61 @@
         </div>
     </div>
 
+    <!-- Forgot Password Modal -->
+    <div id="forgotModal" class="modal hidden">
+        <div class="modal-content" style="max-width:450px">
+            <div class="modal-header" style="background:linear-gradient(135deg,#1e3c72,#2a5298);color:white;border-radius:20px 20px 0 0">
+                <h3 style="color:white">🔑 Reset Kata Laluan</h3>
+                <button class="modal-close" onclick="closeForgotModal()" style="color:white">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="forgotStep1">
+                    <p style="margin-bottom:15px;color:#666">Masukkan alamat emel berdaftar anda. Pautan untuk menetapkan kata laluan baharu akan dihantar ke emel itu (sah 1 jam).</p>
+                    <div class="form-group">
+                        <label for="forgotEmail" style="color:#1e3c72;font-weight:600">Emel Berdaftar *</label>
+                        <input type="email" id="forgotEmail" placeholder="Contoh: nama@email.com" style="border:2px solid #e0e0e0;border-radius:10px;padding:12px 15px;width:100%;font-size:1em">
+                    </div>
+                    <div id="forgotError" class="error-message hidden"></div>
+                </div>
+                <div id="forgotStep2" class="hidden">
+                    <div class="success-message-mini" style="display:block">
+                        📬 Jika emel itu berdaftar, pautan reset telah dihantar. Sila semak <strong>inbox</strong> atau folder <strong>spam</strong>, kemudian klik pautan untuk menetapkan kata laluan baharu.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeForgotModal()">Tutup</button>
+                <button class="btn btn-primary" id="forgotSubmitBtn" onclick="submitForgot()">📧 Hantar Pautan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Password Modal (dibuka melalui pautan emel ?reset=TOKEN) -->
+    <div id="resetModal" class="modal hidden">
+        <div class="modal-content" style="max-width:450px">
+            <div class="modal-header" style="background:linear-gradient(135deg,#2E7D32,#4CAF50);color:white;border-radius:20px 20px 0 0">
+                <h3 style="color:white">🔑 Tetapkan Kata Laluan Baharu</h3>
+                <button class="modal-close" onclick="closeResetModal()" style="color:white">✕</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom:15px;color:#666">Masukkan kata laluan baharu anda (min 6 aksara):</p>
+                <div class="form-group">
+                    <label for="newPassword1" style="color:#1e3c72;font-weight:600">Kata Laluan Baharu *</label>
+                    <input type="password" id="newPassword1" placeholder="Min 6 aksara" minlength="6" style="border:2px solid #e0e0e0;border-radius:10px;padding:12px 15px;width:100%;font-size:1em">
+                </div>
+                <div class="form-group" style="margin-top:12px">
+                    <label for="newPassword2" style="color:#1e3c72;font-weight:600">Sahkan Kata Laluan *</label>
+                    <input type="password" id="newPassword2" placeholder="Taip semula kata laluan" minlength="6" style="border:2px solid #e0e0e0;border-radius:10px;padding:12px 15px;width:100%;font-size:1em">
+                </div>
+                <div id="resetError" class="error-message hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeResetModal()">Batal</button>
+                <button class="btn btn-success" id="resetSubmitBtn" onclick="submitNewPassword()">✅ Simpan Kata Laluan</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Detail Modal -->
     <div id="detailModal" class="modal hidden">
         <div class="modal-content">
@@ -310,7 +366,7 @@
         </div>
     </div>
 
-    <script src="script.js?v=emailfix"></script>
-    <script src="user-portal.js?v=emailfix"></script>
+    <script src="script.js?v=resetpw"></script>
+    <script src="user-portal.js?v=resetpw"></script>
 </body>
 </html>
