@@ -1,6 +1,6 @@
 # 🛠️ Panduan Database Railway — Sistem Penggunaan Kenderaan CSB
 
-> **STATUS: SELESAI ✅ (2026-09-17)** — Production kini berjalan dengan PostgreSQL penuh.
+> **STATUS: SELESAI ✅ (2026-09-18)** — PostgreSQL penuh di production + notifikasi emel aktif (Brevo API HTTP). SMS/Twilio dibuang sepenuhnya — sistem emel sahaja.
 
 ## 🔍 Audit Ke-2 (2026-09-17): Punca Duplicate Permohonan & Pembaikan Menyeluruh
 

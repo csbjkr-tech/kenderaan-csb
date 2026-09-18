@@ -101,7 +101,6 @@ Status: completed (Selesai)
 | **Frontend** | HTML / CSS / JavaScript (vanilla) |
 | **Notifikasi Email** | Nodemailer SMTP (lokal) · API HTTP Brevo/Resend (production — port SMTP disekat Railway, lihat 🔔) |
 | **Notifikasi** | **Emel sahaja** — Brevo API HTTP (production) / SMTP Gmail (lokal). *SMS/Twilio dibuang 2026-09-18* |
-| **Tunnel** | Cloudflare (cloudflared, optional) |
 | **Port** | 8080 (default) |
 
 ### Struktur Fail Utama
@@ -207,8 +206,8 @@ Status: completed (Selesai)
 | `GET` | `/api/admin/info` | Maklumat akaun admin |
 | `GET` | `/api/admin/backup` | Muat turun backup JSON |
 | `POST` | `/api/admin/restore` | Pulihkan dari backup |
-| `GET` | `/api/admin/notifications/status` | Status konfigurasi + ringkasan penghantaran emel/SMS |
-| `POST` | `/api/admin/notifications/test` | Uji hantar emel/SMS tanpa permohonan sebenar |
+| `GET` | `/api/admin/notifications/status` | Status konfigurasi + ringkasan penghantaran emel |
+| `POST` | `/api/admin/notifications/test` | Uji hantar emel tanpa permohonan sebenar |
 | `PUT` | `/api/admin/change-password` | Tukar kata laluan |
 | `PUT` | `/api/admin/reset-password` | Reset kata laluan |
 | `PUT` | `/api/admin/reset-to-default` | Reset ke default |
@@ -230,7 +229,7 @@ Status: completed (Selesai)
 npm install
 
 # 2. Salin & isi konfigurasi
-#    (DATABASE_URL, email/Twilio — rujuk panduan dalam fail)
+#    (DATABASE_URL, Brevo/SMTP — rujuk panduan dalam fail)
 cp .env.example .env
 
 # 3. Jalankan server (auto-load .env melalui dotenv — tiada langkah tambahan)
