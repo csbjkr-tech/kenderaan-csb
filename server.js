@@ -848,8 +848,8 @@ app.get('/api/admin/notifications/status', requireAdmin, async (req, res) => {
         res.json({
             config: {
                 email: {
-                    configured: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS &&
-                        process.env.EMAIL_USER !== 'your-email@gmail.com' && process.env.EMAIL_PASS !== 'your-app-password'),
+                    configured: notifications.isEmailConfigured(),
+                    provider: notifications.getEmailProvider(), // 'brevo' (API HTTP) atau 'smtp'
                     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
                     port: process.env.EMAIL_PORT || '587',
                     user: process.env.EMAIL_USER || ''

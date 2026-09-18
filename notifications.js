@@ -1,6 +1,12 @@
 const nodemailer = require('nodemailer');
 const twilio = require('twilio');
 
+// Helper: ralat ringkas & mudah baca (termasuk respons HTTP Brevo)
+function briefError(e) {
+    if (!e) return 'Unknown error';
+    return e.message || String(e);
+}
+
 // ===== CONFIGURATION =====
 // Update these values with your actual email and SMS provider credentials
 
@@ -16,6 +22,16 @@ const EMAIL_CONFIG = {
         user: process.env.EMAIL_USER || 'your-email@gmail.com',
         pass: process.env.EMAIL_PASS || 'your-app-password'
     }
+};
+
+// Brevo API HTTP — SATU-SATUNYA cara emel production Railway (port SMTP 587/465 disekat platform;
+// hanya port 443 terbuka). Rujuk RAILWAY-FIX-GUIDE.md (Audit Ke-3).
+const BREVO_CONFIG = {
+    apiKey: process.env.BREVO_API_KEY || '',
+    apiUrl: 'https://api.brevo.com/v3/smtp/email',
+    senderEmail: process.env.EMAIL_FROM || process.env.EMAIL_USER || '',
+    senderName: process.env.EMAIL_SENDER_NAME || 'Sistem Penggunaan Kenderaan',
+    timeoutMs: parseInt(process.env.BREVO_TIMEOUT || '10000')
 };
 
 const SMS_CONFIG = {
@@ -58,11 +74,71 @@ function initTwilioClient() {
     }
 }
 
+// ===== EMAIL VIA BREVO API HTTP (untuk production Railway) =====
+async function sendEmailViaBrevo(to, subject, htmlContent) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BREVO_CONFIG.timeoutMs);
+    try {
+        const resp = await fetch(BREVO_CONFIG.apiUrl, {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': BREVO_CONFIG.apiKey,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                sender: { email: BREVO_CONFIG.senderEmail, name: BREVO_CONFIG.senderName },
+                to: [{ email: to }],
+                subject: subject,
+                htmlContent: htmlContent
+            }),
+            signal: controller.signal
+        });
+        const bodyText = await resp.text();
+        if (!resp.ok) {
+            // Brevo pulangkan JSON { message, code } bila gagal — tampilkan untuk diagnosis pantas
+            let detail = bodyText;
+            try { detail = JSON.parse(bodyText).message || bodyText; } catch (_) { /* kekal teks mentah */ }
+            console.error('Brevo API error:', resp.status, detail);
+            return { success: false, provider: 'brevo', error: `Brevo API ${resp.status}: ${detail}` };
+        }
+        const data = JSON.parse(bodyText);
+        console.log('📧 Email sent via Brevo API:', data.messageId || '(tiada id)');
+        return { success: true, provider: 'brevo', messageId: data.messageId };
+    } catch (error) {
+        const reason = error.name === 'AbortError'
+            ? `Brevo API timeout selepas ${BREVO_CONFIG.timeoutMs}ms`
+            : briefError(error);
+        console.error('Brevo send error:', reason);
+        return { success: false, provider: 'brevo', error: reason };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function isEmailConfigured() {
+    // Brevo dikira konfigurasi bila kunci API + alamat pengirim wujud (bukan placeholder)
+    if (BREVO_CONFIG.apiKey && BREVO_CONFIG.senderEmail &&
+        BREVO_CONFIG.apiKey !== 'your-brevo-api-key') return true;
+    return !!(process.env.EMAIL_USER && process.env.EMAIL_PASS &&
+        process.env.EMAIL_USER !== 'your-email@gmail.com' && process.env.EMAIL_PASS !== 'your-app-password');
+}
+
+function getEmailProvider() {
+    return (BREVO_CONFIG.apiKey && BREVO_CONFIG.apiKey !== 'your-brevo-api-key') ? 'brevo' : 'smtp';
+}
+
 // ===== EMAIL NOTIFICATIONS =====
+// Strategi: jika BREVO_API_KEY diset -> hantar melalui API HTTP (port 443, satu-satunya laluan
+// di Railway). Jika tidak -> fallback SMTP (lokal mesin sendiri, Gmail App Password diperlukan).
 async function sendEmail(to, subject, htmlContent) {
+    if (getEmailProvider() === 'brevo') {
+        return sendEmailViaBrevo(to, subject, htmlContent);
+    }
+
     if (!emailTransporter) {
         console.warn('Email transporter not initialized');
-        return { success: false, error: 'Email not configured' };
+        return { success: false, provider: 'smtp', error: 'Email not configured' };
     }
 
     try {
@@ -74,11 +150,11 @@ async function sendEmail(to, subject, htmlContent) {
         };
 
         const info = await emailTransporter.sendMail(mailOptions);
-        console.log('📧 Email sent:', info.messageId);
-        return { success: true, messageId: info.messageId };
+        console.log('📧 Email sent via SMTP:', info.messageId);
+        return { success: true, provider: 'smtp', messageId: info.messageId };
     } catch (error) {
         console.error('Email send error:', error.message);
-        return { success: false, error: error.message };
+        return { success: false, provider: 'smtp', error: error.message };
     }
 }
 
@@ -280,7 +356,14 @@ async function sendNotification(request, type, db) {
 // ===== INITIALIZE =====
 function initialize() {
     console.log('🔧 Initializing notification service...');
-    const emailReady = initEmailTransporter();
+    let emailReady;
+    if (getEmailProvider() === 'brevo') {
+        // Brevo: tiada transporter diperlukan — penghantaran melalui API HTTP on-demand
+        emailReady = isEmailConfigured();
+        console.log(`✅ Email provider: Brevo API HTTP (${BREVO_CONFIG.senderEmail || 'sender tiada'})`);
+    } else {
+        emailReady = initEmailTransporter();
+    }
     const smsReady = initTwilioClient();
     
     return {
@@ -294,6 +377,8 @@ module.exports = {
     sendSMS,
     sendNotification,
     initialize,
+    isEmailConfigured,
+    getEmailProvider,
     generateApprovalEmail,
     generateRejectionEmail,
     generateApprovalSMS,

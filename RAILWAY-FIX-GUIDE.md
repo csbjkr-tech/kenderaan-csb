@@ -114,7 +114,13 @@ Guna penyedia emel dengan **API HTTP** dan `API_KEY` dalam variables Railway —
 
 Langkah: daftar akaun → sahkan domain/pengirim → simpan kunci sebagai `BREVO_API_KEY` (atau
 `RESEND_API_KEY`) dalam Railway variables → integrasi dalam `notifications.js` sebagai provider
-HTTP selari dengan SMTP. **Lokal tidak terjejas** — sambungan SMTP dari mesin sendiri ke Gmail
+HTTP selari dengan SMTP.
+
+> ✅ **STATUS: INTEGRASI SELESAI (2026-09-18)** — `notifications.js` kini menyokong Brevo API HTTP
+> secara native: bila `BREVO_API_KEY` diset, emel dihantar melalui `POST api.brevo.com/v3/smtp/email`
+> (port 443, timeout 10s, boleh atur `BREVO_TIMEOUT`); bila kosong → fallback SMTP seperti biasa
+> (lokal). Tab 📢 Notifikasi memaparkan provider aktif (`brevo`/`smtp`). Laluan Brevo telah diuji
+> (kunci tidak sah → `401 Key not found` dilaporkan dengan jelas dalam ~1.3s). **Lokal tidak terjejas** — sambungan SMTP dari mesin sendiri ke Gmail
 berfungsi (terbukti: ralat `534/535` daripada Gmail bermakna pakej sampai; cuma perlu
 **App Password 16 aksara**, bukan kata laluan akaun).
 

@@ -343,11 +343,13 @@ async function loadNotificationsData() {
         notifConfigBadge('notifEmailConfig', d.config.email.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
         notifConfigBadge('notifSmsConfig', d.config.sms.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
         const hostEl = document.getElementById('notifEmailHost');
-        if (hostEl) hostEl.textContent = `${d.config.email.host}:${d.config.email.port} (${d.config.email.user || 'tiada akaun'})`;
+        if (hostEl) hostEl.textContent = d.config.email.provider === 'brevo'
+            ? `Brevo API HTTP (port 443) · pengirim: ${d.config.email.user || 'tiada'} · SMTP disekat di Railway`
+            : `${d.config.email.host}:${d.config.email.port} (${d.config.email.user || 'tiada akaun'})`;
         const hint = document.getElementById('notifConfigHint');
         if (hint) {
             const tips = [];
-            if (!d.config.email.configured) tips.push('📧 Isikan EMAIL_USER & EMAIL_PASS (Gmail App Password) dalam environment');
+            if (!d.config.email.configured) tips.push('📧 Isikan BREVO_API_KEY (production) ATAU EMAIL_USER & EMAIL_PASS (Gmail App Password, lokal) dalam environment');
             if (!d.config.sms.configured) tips.push('📱 Isikan TWILIO_SID, TWILIO_AUTH_TOKEN & TWILIO_PHONE_NUMBER untuk SMS');
             hint.textContent = tips.join(' · ') || '✅ Semua saluran notifikasi telah dikonfigurasi.';
         }
