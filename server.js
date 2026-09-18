@@ -346,7 +346,6 @@ async function initDatabase() {
 // ===== INITIALIZE NOTIFICATIONS =====
 const notificationStatus = notifications.initialize();
 console.log('📧 Email notifications:', notificationStatus.email ? 'ENABLED' : 'DISABLED');
-console.log('📱 SMS notifications:', notificationStatus.sms ? 'ENABLED' : 'DISABLED');
 
 // Helper: extract readable error message
 function errMsg(error) {
@@ -675,7 +674,7 @@ app.get('/api/notifications', requireAdmin, async (req, res) => {
     }
 });
 
-// Uji hantar notifikasi (emel/SMS ujian tanpa permohonan sebenar)
+// Uji hantar notifikasi (emel ujian tanpa permohonan sebenar)
 app.post('/api/admin/notifications/test', requireAdmin, async (req, res) => {
     try {
         const { channel = 'both', recipient } = req.body || {};
@@ -689,18 +688,14 @@ app.post('/api/admin/notifications/test', requireAdmin, async (req, res) => {
             tujuan: 'Ujian penghantaran daripada Panel Admin',
             admin_notes: ''
         };
+        if (channel === 'sms') {
+            return res.status(400).json({ error: 'SMS telah dibuang (2026-09-18) — sistem menggunakan notifikasi emel sahaja (Brevo).' });
+        }
         if (channel === 'email' || channel === 'both') {
             let to = (recipient && recipient.includes('@')) ? recipient.trim() : '';
             if (!to && process.env.EMAIL_USER && process.env.EMAIL_USER !== 'your-email@gmail.com') to = process.env.EMAIL_USER;
             if (!to) return res.status(400).json({ error: 'Tiada alamat emel sasaran. Isi kredensial EMAIL_USER dahulu atau nyatakan alamat.' });
             results.email = { to, ...(await notifications.sendEmail(to, '✅ Emel Ujian - Sistem Penggunaan Kenderaan', notifications.generateApprovalEmail(testReq))) };
-        }
-        if (channel === 'sms' || channel === 'both') {
-            let to = (recipient && /^\+?\d+$/.test(recipient)) ? recipient.trim() : '';
-            if (to && to.startsWith('0')) to = '+60' + to.substring(1);
-            if (!to) to = process.env.TWILIO_PHONE_NUMBER || '';
-            if (!to) return res.status(400).json({ error: 'Tiada nombor SMS sasaran. Nyatakan nombor (contoh: 0123456789) atau isi TWILIO_PHONE_NUMBER.' });
-            results.sms = { to, ...(await notifications.sendSMS(to, notifications.generateApprovalSMS(testReq))) };
         }
         res.json({ success: true, results });
     } catch (error) {
@@ -828,13 +823,14 @@ app.put('/api/admin/reset-password', requireAdmin, async (req, res) => {
     }
 });
 
-// Status notifikasi: konfigurasi email/SMS + ringkasan kejayaan penghantaran
+// Status notifikasi: konfigurasi emel + ringkasan kejayaan penghantaran
 app.get('/api/admin/notifications/status', requireAdmin, async (req, res) => {
     try {
         const rows = await db.prepare('SELECT type, status, COUNT(*) AS n FROM notifications GROUP BY type, status').all();
-        const summary = { email: { sent: 0, failed: 0 }, sms: { sent: 0, failed: 0 } };
+        const summary = { email: { sent: 0, failed: 0 } }; // SMS dibuang (2026-09-18); rekod legasi sms diabaikan
         for (const r of rows) {
             const t = (r.type || '').toLowerCase();
+            if (t !== 'email') continue;
             if (summary[t] && (r.status === 'sent' || r.status === 'failed')) summary[t][r.status] = parseInt(r.n);
         }
         const recentRows = await db.prepare('SELECT id, type, recipient, status, error_message, created_at FROM notifications ORDER BY id DESC LIMIT 15').all();
@@ -855,7 +851,9 @@ app.get('/api/admin/notifications/status', requireAdmin, async (req, res) => {
                     user: process.env.EMAIL_USER || ''
                 },
                 sms: {
-                    configured: !!(process.env.TWILIO_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_PHONE_NUMBER)
+                    configured: false,
+                    removed: true,
+                    note: 'SMS dibuang 2026-09-18 — notifikasi emel sahaja (Brevo)'
                 }
             },
             summary,

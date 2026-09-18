@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Token sesi disuntik server semasa hidup => dapatkan token admin sebelum JS lain berjalan -->
     <meta name="csrf-token" content="__ADMIN_TOKEN__">
-    <link rel="stylesheet" href="style.css?v=audit4">
+    <link rel="stylesheet" href="style.css?v=emailonly">
 </head>
 <body>
     <div class="container">
@@ -244,26 +244,14 @@
                         <div class="stat-number" id="notifEmailFailed">0</div>
                         <div class="stat-label">Emel Gagal</div>
                     </div>
-                    <div class="stat-card" style="border-top-color:#9C27B0">
-                        <div class="stat-number" id="notifSmsSent" style="color:#9C27B0">0</div>
-                        <div class="stat-label">SMS Berjaya</div>
-                    </div>
-                    <div class="stat-card rejected">
-                        <div class="stat-number" id="notifSmsFailed">0</div>
-                        <div class="stat-label">SMS Gagal</div>
-                    </div>
                 </div>
                 
                 <div class="settings-card" style="margin-bottom:15px">
                     <h3>🔌 Status Konfigurasi</h3>
                     <div class="security-info">
                         <div class="info-item">
-                            <span class="info-label">📧 Emel (SMTP):</span>
+                            <span class="info-label">📧 Emel (Brevo/SMTP):</span>
                             <span id="notifEmailConfig" class="status-badge pending">Menyemak...</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="info-label">📱 SMS (Twilio):</span>
-                            <span id="notifSmsConfig" class="status-badge pending">Menyemak...</span>
                         </div>
                         <div class="info-item">
                             <span class="info-label">🖥️ Pelayan SMTP:</span>
@@ -275,11 +263,10 @@
                 
                 <div class="settings-card" style="margin-bottom:15px">
                     <h3>🧪 Uji Penghantaran</h3>
-                    <p style="color:#666;margin-bottom:10px">Hantar emel/SMS ujian tanpa perlu luluskan permohonan sebenar. Kosongkan ruangan untuk hantar kepada diri sendiri.</p>
+                    <p style="color:#666;margin-bottom:10px">Hantar emel ujian tanpa perlu luluskan permohonan sebenar. Kosongkan ruangan untuk hantar kepada diri sendiri.</p>
                     <div class="danger-actions" style="flex-wrap:wrap;gap:8px;align-items:center">
-                        <input type="text" id="notifTestRecipient" placeholder="Alamat emel / no. telefon (pilihan)" style="flex:1;min-width:220px;padding:8px;border:1px solid #ddd;border-radius:8px">
+                        <input type="text" id="notifTestRecipient" placeholder="Alamat emel (pilihan)" style="flex:1;min-width:220px;padding:8px;border:1px solid #ddd;border-radius:8px">
                         <button class="btn btn-primary btn-sm" onclick="sendTestNotification('email')">📧 Uji Emel</button>
-                        <button class="btn btn-primary btn-sm" onclick="sendTestNotification('sms')">📱 Uji SMS</button>
                     </div>
                     <div id="notifTestResult" class="hidden" style="margin-top:10px;padding:10px;border-radius:8px;font-size:0.9em"></div>
                 </div>
@@ -357,6 +344,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=audit4"></script>
+    <script src="script.js?v=emailonly"></script>
 </body>
 </html>

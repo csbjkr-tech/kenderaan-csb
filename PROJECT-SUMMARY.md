@@ -69,7 +69,7 @@ Status: completed (Selesai)
 - Tukar kata laluan, tetapan akaun
 - Eksport data CSV
 - **Backup & Restore** data (JSON) — penting untuk pemindahan data
-- **Tab 📢 Notifikasi** — status konfigurasi emel/SMS, statistik penghantaran, log + butang Uji Hantar
+- **Tab 📢 Notifikasi** — status konfigurasi emel, statistik penghantaran, log + butang Uji Emel
 - **Zon bahaya** (padam data, reset kata laluan)
 
 ### Ketahanan Sistem
@@ -100,7 +100,7 @@ Status: completed (Selesai)
 | **Database** | **PostgreSQL** (`pg`) — Railway production & lokal (PostgreSQL 18) |
 | **Frontend** | HTML / CSS / JavaScript (vanilla) |
 | **Notifikasi Email** | Nodemailer SMTP (lokal) · API HTTP Brevo/Resend (production — port SMTP disekat Railway, lihat 🔔) |
-| **Notifikasi SMS** | Twilio |
+| **Notifikasi** | **Emel sahaja** — Brevo API HTTP (production) / SMTP Gmail (lokal). *SMS/Twilio dibuang 2026-09-18* |
 | **Tunnel** | Cloudflare (cloudflared, optional) |
 | **Port** | 8080 (default) |
 
@@ -150,18 +150,18 @@ Status: completed (Selesai)
 ### Email — Audit Ke-3 (2026-09-18, butiran penuh: `RAILWAY-FIX-GUIDE.md`)
 - Dihantar semasa permohonan diluluskan atau ditolak; setiap cubaan direkod dalam jadual `notifications` (berjaya/gagal + sebab sebenar)
 - ⚠️ **Railway menyekat port SMTP (587 & 465)** — polisi platform anti-spam (dibuktikan dengan probe dari dalam kontainer). Penghantaran SMTP terus dari production **tidak mungkin** — ini bukan masalah kod
-- **Penyelesaian production:** provider emel dengan **API HTTP** (port 443 terbuka) — **Brevo** (percuma 300/hari) atau **Resend** (100/hari); integrasi dalam `notifications.js`
+- **Penyelesaian production (AKTIF ✅ sejak 2026-09-18):** **Brevo API HTTP** terintegrasi dan **terbukti terhantar** ke inbox sebenar — perlukan `BREVO_API_KEY`, pengirim tersahkan, dan IP keluar Railway dibenarkan di Brevo (panduan lengkap 6 langkah: `RAILWAY-FIX-GUIDE.md`). Alternatif: Resend (100/hari)
 - **Lokal berfungsi** — SMTP ke Gmail dari mesin sendiri sampai; perlukan **App Password 16 aksara** dari https://myaccount.google.com/apppasswords (kata laluan akaun ditolak oleh Gmail)
 - **Timeout SMTP** — connection 10s / greeting 10s / socket 15s (boleh atur: `EMAIL_CONNECT_TIMEOUT`) → request gagal pantas, tak tergantung selamanya
 - **IPv4-first DNS** — `dns.setDefaultResultOrder('ipv4first')` (kontainer Railway tiada rangkaian IPv6)
 
-### SMS (Twilio)
-- Kod menerima **kedua-dua konvensyen nama kunci**: `TWILIO_SID`/`TWILIO_ACCOUNT_SID` dan `TWILIO_FROM`/`TWILIO_PHONE_NUMBER`
-- Nota: kredensial Twilio production belum diisi — SMS masih DISABLED sehingga diisi
+### SMS — DIBUANG (2026-09-18)
+- Keputusan reka bentuk: sistem menggunakan **notifikasi emel sahaja** (Brevo/SMTP)
+- Twilio dibuang sepenuhnya: kod, dependency `twilio`, kunci environment, dan UI SMS
 
 ### Tab 📢 Notifikasi (Panel Admin)
-- Status konfigurasi emel/SMS (badge ✅/❌), statistik berjaya/gagal, 15 penghantaran terkini dengan sebab kegagalan
-- Butang **🧪 Uji Emel / Uji SMS** — uji penghantaran tanpa perlu luluskan permohonan sebenar (ruangan kosong = hantar kepada diri sendiri)
+- Status konfigurasi emel (badge ✅/❌), statistik berjaya/gagal, 15 penghantaran terkini dengan sebab kegagalan
+- Butang **🧪 Uji Emel** — uji penghantaran tanpa perlu luluskan permohonan sebenar (ruangan kosong = hantar kepada diri sendiri)
 
 ---
 
@@ -266,6 +266,8 @@ Hasil yang diharap: `{"status":"ok","db":true,...}` — admin `admin`/`admin123`
 | 2026-09-18 | **Audit Ke-3 emel** — timeout SMTP + IPv4-first; disahkan **Railway sekat port 587/465** → penyelesaian API HTTP (Brevo/Resend); butiran: `RAILWAY-FIX-GUIDE.md` |
 | 2026-09-18 | **`ADMIN_SESSION_SECRET` tetap** — sesi admin kekal merentas deploy (dibuktikan dengan ujian redeploy) |
 | 2026-09-18 | **dotenv** — server auto-load `.env`; guard `PORT=0` rosak dari env mesin; fail legasi SQLite dipadam |
+| 2026-09-18 | **Emel production aktif** — Brevo API HTTP: kunci diset, IP keluar Railway dibenarkan, emel sebenar terhantar ke inbox (terbukti) |
+| 2026-09-18 | **Keputusan reka bentuk: emel sahaja** — Twilio/SMS dibuang sepenuhnya (kod, dependency, UI); **audit kod lapuk**: skrip tunnel/bat, DB SQLite kedua, salinan legasi dokumen & log lama dibuang |
 
 ---
 

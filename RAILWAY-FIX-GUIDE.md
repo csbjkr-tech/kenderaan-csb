@@ -66,7 +66,8 @@ Endpoint ini melakukan ping DB sebenar (`SELECT 1`) sejak commit `7de8cd2`.
 ## ⚠️ Nota Penyelenggaraan
 
 - Jangan padam plugin **Postgres** dalam projek `energetic-dream` — itu kini database production yang sebenar
-- Volume `postgres-volume` menyimpan data — Railway mengekalkannya merentas deploy- Kata laluan DB tidak perlu diketahui oleh manusia; reference `${{Postgres.DATABASE_URL}}` mengurusnya secara automatik
+- Volume `postgres-volume` menyimpan data — Railway mengekalkannya merentas deploy
+- Kata laluan DB tidak perlu diketahui oleh manusia; reference `${{Postgres.DATABASE_URL}}` mengurusnya secara automatik
 
 ---
 
@@ -112,15 +113,23 @@ Guna penyedia emel dengan **API HTTP** dan `API_KEY` dalam variables Railway —
 | **Brevo** (dahulunya Sendinblue) | 300 emel/hari | `POST https://api.brevo.com/v3/smtp/email` dengan header `api-key` |
 | **Resend** | 100 emel/hari | `POST https://api.resend.com/emails` dengan `Authorization: Bearer` |
 
-Langkah: daftar akaun → sahkan domain/pengirim → simpan kunci sebagai `BREVO_API_KEY` (atau
-`RESEND_API_KEY`) dalam Railway variables → integrasi dalam `notifications.js` sebagai provider
-HTTP selari dengan SMTP.
+### Penyediaan Brevo dari Awal Hingga Berjaya (dilaksanakan & diuji 2026-09-18)
 
-> ✅ **STATUS: INTEGRASI SELESAI (2026-09-18)** — `notifications.js` kini menyokong Brevo API HTTP
-> secara native: bila `BREVO_API_KEY` diset, emel dihantar melalui `POST api.brevo.com/v3/smtp/email`
-> (port 443, timeout 10s, boleh atur `BREVO_TIMEOUT`); bila kosong → fallback SMTP seperti biasa
-> (lokal). Tab 📢 Notifikasi memaparkan provider aktif (`brevo`/`smtp`). Laluan Brevo telah diuji
-> (kunci tidak sah → `401 Key not found` dilaporkan dengan jelas dalam ~1.3s). **Lokal tidak terjejas** — sambungan SMTP dari mesin sendiri ke Gmail
+| # | Langkah | Nota penting |
+|---|---------|--------------|
+| 1 | Daftar akaun di **https://app.brevo.com** | Percuma — 300 emel/hari |
+| 2 | **Sahkan alamat pengirim:** Settings → *Senders, Domains & Dedicated IPs* → **Senders** → *Add a sender* → klik pautan pengesahan dalam emel Brevo | **WAJIB** — penghantaran ditolak tanpa sender tersahkan |
+| 3 | **Jana kunci API:** ikon profil → **Settings** → **SMTP & API** → **API Keys** → *Generate a new API key* → nama bebas, luput pilih *tiada* | Kunci `xkeysib-…` dipapar **SEKALI sahaja** — salin serta-merta |
+| 4 | **Set variables Railway:** `BREVO_API_KEY=<kunci>` dan `EMAIL_FROM=<alamat pengirim tersahkan>` (dashboard → Variables, atau `railway variables --set`) | Railway auto-redeploy selepas simpan |
+| 5 | **Benarkan IP keluar Railway:** jalankan Uji Emel → baca IP yang ditolak dalam ralat `401` → tambah di **https://app.brevo.com/security/authorised_ips** | Contoh sebenar: `208.77.244.18`. IP boleh berubah — mesej ralat sistem **sentiasa papar IP yang perlu ditambah**, salin terus dari situ |
+| 6 | **Uji penghantaran:** Panel Admin → 📢 Notifikasi → **📧 Uji Emel** (ruangan kosong = hantar kepada `EMAIL_USER`; jika masih placeholder, nyatakan alamat penuh dalam ruangan) | ✅ Terbukti: emel sampai ke inbox, `messageId` direkod, status `sent` |
+
+Keputusan akhir: endpoint status memaparkan `provider: brevo, configured: true` dan penghantaran
+kelulusan sebenar kini berfungsi di production.
+
+> ✅ **STATUS: BERJAYA DIUJI SEPENUHNYA (2026-09-18)** — emel ujian sebenar terhantar dari
+> production ke inbox (`success: true`, messageId `<…@smtp-relay.mailin.fr>`). Bila kunci tidak
+> sah, laluan Brevo melaporkan jelas (`401 Key not found`, ~1.3 saat). **Lokal tidak terjejas** — sambungan SMTP dari mesin sendiri ke Gmail
 berfungsi (terbukti: ralat `534/535` daripada Gmail bermakna pakej sampai; cuma perlu
 **App Password 16 aksara**, bukan kata laluan akaun).
 
@@ -134,3 +143,6 @@ berfungsi (terbukti: ralat `534/535` daripada Gmail bermakna pakej sampai; cuma 
    dengan header `Retry-After`. Ujian brute-force boleh "membakar" kuota IP sendiri buat sementara.
 - Status semasa konfigurasi semak dalam Panel Admin → tab **📢 Notifikasi** (badge ✅/❌ + log gagal
    dengan sebab sebenar).
+- **2026-09-18: SMS/Twilio dibuang sepenuhnya** — keputusan reka bentuk, sistem kini **emel sahaja**
+   (Brevo). Nota: API Twilio turut melalui port 443 (tiada halangan teknikal di Railway); pembuangan
+   ini pilihan, bukan sekatan.

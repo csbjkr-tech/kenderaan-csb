@@ -1,5 +1,4 @@
 const nodemailer = require('nodemailer');
-const twilio = require('twilio');
 
 // Helper: ralat ringkas & mudah baca (termasuk respons HTTP Brevo)
 function briefError(e) {
@@ -8,7 +7,6 @@ function briefError(e) {
 }
 
 // ===== CONFIGURATION =====
-// Update these values with your actual email and SMS provider credentials
 
 const EMAIL_CONFIG = {
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
@@ -24,8 +22,9 @@ const EMAIL_CONFIG = {
     }
 };
 
-// Brevo API HTTP — SATU-SATUNYA cara emel production Railway (port SMTP 587/465 disekat platform;
+// Brevo API HTTP — emel production Railway (port SMTP 587/465 disekat platform;
 // hanya port 443 terbuka). Rujuk RAILWAY-FIX-GUIDE.md (Audit Ke-3).
+// NOTA: sistem ini menggunakan EMEL SAHAJA (Brevo) — tiada SMS sejak 2026-09-18.
 const BREVO_CONFIG = {
     apiKey: process.env.BREVO_API_KEY || '',
     apiUrl: 'https://api.brevo.com/v3/smtp/email',
@@ -34,19 +33,10 @@ const BREVO_CONFIG = {
     timeoutMs: parseInt(process.env.BREVO_TIMEOUT || '10000')
 };
 
-const SMS_CONFIG = {
-    // Terima kedua-dua nama kunci (TWILIO_SID/TWILIO_ACCOUNT_SID, TWILIO_FROM/TWILIO_PHONE_NUMBER)
-    // supaya kedua-dua konvensyen .env berfungsi tanpa kegagalan senyap.
-    accountSid: process.env.TWILIO_SID || process.env.TWILIO_ACCOUNT_SID || 'your-account-sid',
-    authToken: process.env.TWILIO_AUTH_TOKEN || 'your-auth-token',
-    fromNumber: process.env.TWILIO_FROM || process.env.TWILIO_PHONE_NUMBER || '+1234567890'
-};
-
 // ===== TRANSPORTERS =====
 let emailTransporter = null;
-let twilioClient = null;
 
-// Initialize email transporter
+// Initialize email transporter (fallback SMTP untuk lokal)
 function initEmailTransporter() {
     try {
         emailTransporter = nodemailer.createTransport(EMAIL_CONFIG);
@@ -54,22 +44,6 @@ function initEmailTransporter() {
         return true;
     } catch (error) {
         console.warn('⚠️ Email transporter failed to initialize:', error.message);
-        return false;
-    }
-}
-
-// Initialize Twilio client
-function initTwilioClient() {
-    try {
-        if (SMS_CONFIG.accountSid && SMS_CONFIG.accountSid !== 'your-account-sid') {
-            twilioClient = twilio(SMS_CONFIG.accountSid, SMS_CONFIG.authToken);
-            console.log('✅ Twilio client initialized');
-            return true;
-        }
-        console.warn('⚠️ Twilio credentials not configured');
-        return false;
-    } catch (error) {
-        console.warn('⚠️ Twilio client failed to initialize:', error.message);
         return false;
     }
 }
@@ -158,28 +132,7 @@ async function sendEmail(to, subject, htmlContent) {
     }
 }
 
-// ===== SMS NOTIFICATIONS =====
-async function sendSMS(to, message) {
-    if (!twilioClient) {
-        console.warn('Twilio client not initialized');
-        return { success: false, error: 'SMS not configured' };
-    }
-
-    try {
-        const result = await twilioClient.messages.create({
-            body: message,
-            from: SMS_CONFIG.fromNumber,
-            to: to
-        });
-        console.log('📱 SMS sent:', result.sid);
-        return { success: true, sid: result.sid };
-    } catch (error) {
-        console.error('SMS send error:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-
-// ===== NOTIFICATION TEMPLATES =====
+// ===== EMAIL TEMPLATES =====
 function generateApprovalEmail(request) {
     return `
         <!DOCTYPE html>
@@ -281,29 +234,15 @@ function generateRejectionEmail(request) {
     `;
 }
 
-function generateApprovalSMS(request) {
-    return `Sistem Penggunaan Kenderaan: Permohonan kenderaan ${request.no_plate} pada ${formatDate(request.tarikh_bertolak)} telah DILULUSKAN. Sila ambil kenderaan mengikut jadual.`;
-}
-
-function generateRejectionSMS(request) {
-    return `Sistem Penggunaan Kenderaan: Permohonan kenderaan ${request.no_plate} pada ${formatDate(request.tarikh_bertolak)} telah DITOLAK. ${request.admin_notes ? 'Nota: ' + request.admin_notes : ''}`;
-}
-
 function formatDate(dateStr) {
     const options = { day: 'numeric', month: 'short', year: 'numeric' };
     return new Date(dateStr).toLocaleDateString('ms-MY', options);
 }
 
-// ===== MAIN NOTIFICATION FUNCTION =====
+// ===== MAIN NOTIFICATION FUNCTION (emel sahaja) =====
 async function sendNotification(request, type, db) {
     const notifications = [];
-    
-    // Format phone number for SMS (add country code if needed)
-    let phoneNumber = request.no_hp;
-    if (phoneNumber.startsWith('0')) {
-        phoneNumber = '+60' + phoneNumber.substring(1);
-    }
-    
+
     // Email notification (if email is provided)
     if (request.email) {
         const emailSubject = type === 'approved' 
@@ -322,19 +261,6 @@ async function sendNotification(request, type, db) {
             error: emailResult.error || null
         });
     }
-    
-    // SMS notification
-    const smsMessage = type === 'approved' 
-        ? generateApprovalSMS(request) 
-        : generateRejectionSMS(request);
-    
-    const smsResult = await sendSMS(phoneNumber, smsMessage);
-    notifications.push({
-        type: 'sms',
-        recipient: phoneNumber,
-        status: smsResult.success ? 'sent' : 'failed',
-        error: smsResult.error || null
-    });
     
     // Save notification log to database
     if (db) {
@@ -355,7 +281,7 @@ async function sendNotification(request, type, db) {
 
 // ===== INITIALIZE =====
 function initialize() {
-    console.log('🔧 Initializing notification service...');
+    console.log('🔧 Initializing notification service (emel sahaja — Brevo/SMTP)...');
     let emailReady;
     if (getEmailProvider() === 'brevo') {
         // Brevo: tiada transporter diperlukan — penghantaran melalui API HTTP on-demand
@@ -364,23 +290,18 @@ function initialize() {
     } else {
         emailReady = initEmailTransporter();
     }
-    const smsReady = initTwilioClient();
     
     return {
-        email: emailReady,
-        sms: smsReady
+        email: emailReady
     };
 }
 
 module.exports = {
     sendEmail,
-    sendSMS,
     sendNotification,
     initialize,
     isEmailConfigured,
     getEmailProvider,
     generateApprovalEmail,
-    generateRejectionEmail,
-    generateApprovalSMS,
-    generateRejectionSMS
+    generateRejectionEmail
 };

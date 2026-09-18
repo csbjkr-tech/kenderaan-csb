@@ -337,11 +337,8 @@ async function loadNotificationsData() {
         const setNum = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
         setNum('notifEmailSent', d.summary.email.sent);
         setNum('notifEmailFailed', d.summary.email.failed);
-        setNum('notifSmsSent', d.summary.sms.sent);
-        setNum('notifSmsFailed', d.summary.sms.failed);
-        // Konfigurasi
+        // Konfigurasi (SMS dibuang 2026-09-18 — emel sahaja)
         notifConfigBadge('notifEmailConfig', d.config.email.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
-        notifConfigBadge('notifSmsConfig', d.config.sms.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
         const hostEl = document.getElementById('notifEmailHost');
         if (hostEl) hostEl.textContent = d.config.email.provider === 'brevo'
             ? `Brevo API HTTP (port 443) · pengirim: ${d.config.email.user || 'tiada'} · SMTP disekat di Railway`
@@ -350,8 +347,7 @@ async function loadNotificationsData() {
         if (hint) {
             const tips = [];
             if (!d.config.email.configured) tips.push('📧 Isikan BREVO_API_KEY (production) ATAU EMAIL_USER & EMAIL_PASS (Gmail App Password, lokal) dalam environment');
-            if (!d.config.sms.configured) tips.push('📱 Isikan TWILIO_SID, TWILIO_AUTH_TOKEN & TWILIO_PHONE_NUMBER untuk SMS');
-            hint.textContent = tips.join(' · ') || '✅ Semua saluran notifikasi telah dikonfigurasi.';
+            hint.textContent = tips.join(' · ') || '✅ Notifikasi emel (Brevo/SMTP) telah dikonfigurasi.';
         }
         // Senarai terkini
         const list = document.getElementById('notifRecentList');
@@ -379,7 +375,7 @@ async function sendTestNotification(channel) {
     resultBox.classList.remove('hidden');
     resultBox.style.background = '#fff3e0';
     resultBox.style.color = '#b26a00';
-    resultBox.textContent = '⏳ Menghantar ' + (channel === 'email' ? 'emel' : 'SMS') + ' ujian...';
+    resultBox.textContent = '⏳ Menghantar emel ujian...';
     try {
         const r = await apiPost('/api/admin/notifications/test', { channel, recipient });
         const res = (r.results && r.results[channel]) || {};
@@ -387,7 +383,7 @@ async function sendTestNotification(channel) {
         resultBox.style.background = ok ? '#e8f5e9' : '#ffebee';
         resultBox.style.color = ok ? '#2e7d32' : '#c62828';
         resultBox.textContent = ok
-            ? `✅ ${channel === 'email' ? 'Emel' : 'SMS'} ujian berjaya dihantar kepada ${res.to || '-'}${res.messageId ? ' (ID: ' + res.messageId + ')' : ''}${res.sid ? ' (SID: ' + res.sid + ')' : ''}`
+            ? `✅ Emel ujian berjaya dihantar kepada ${res.to || '-'}${res.messageId ? ' (ID: ' + res.messageId + ')' : ''}${res.sid ? ' (SID: ' + res.sid + ')' : ''}`
             : `❌ Gagal: ${res.error || 'tidak diketahui'}`;
     } catch (e) {
         resultBox.style.background = '#ffebee';
@@ -803,7 +799,7 @@ function showToast(message, type = 'success') {
 }
 
 async function approveRequest(id) {
-    const ok = await adminConfirm('Luluskan permohonan ini? Notifikasi emel/SMS akan dihantar kepada pengguna.', { title: '✅ Kelulusan Permohonan', okText: '✅ Ya, Luluskan', danger: false });
+    const ok = await adminConfirm('Luluskan permohonan ini? Notifikasi emel akan dihantar kepada pengguna.', { title: '✅ Kelulusan Permohonan', okText: '✅ Ya, Luluskan', danger: false });
     if (!ok) return;
     try { await apiPut(`/api/requests/${id}/approve`); await loadAdminData(); showToast('✅ Permohonan diluluskan'); } catch (e) { showToast('Ralat: ' + e.message, 'error'); }
 }
