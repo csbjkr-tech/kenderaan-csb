@@ -519,6 +519,24 @@ app.put('/api/requests/:id/approve', requireAdmin, async (req, res) => {
         if (!existing) {
             return res.status(404).json({ error: 'Permohonan tidak ditemui' });
         }
+
+        // Semakan konflik tempahan (2026-09-18): plat sama tidak boleh diluluskan bertindih
+        // tarikh — satu kenderaan = satu hari = satu pengguna (banding tarikh ISO sebagai teks).
+        const konflik = await db.prepare(`
+            SELECT id, nama, no_hp, tarikh_bertolak, tarikh_kembali FROM requests
+            WHERE status = 'approved'
+              AND UPPER(no_plate) = UPPER($1)
+              AND id <> $2
+              AND tarikh_bertolak <= $3
+              AND tarikh_kembali >= $4
+            LIMIT 1
+        `).get(existing.no_plate, existing.id, existing.tarikh_kembali, existing.tarikh_bertolak);
+        if (konflik) {
+            return res.status(409).json({
+                error: `Tempahan bertindih: kenderaan ${existing.no_plate} telah diluluskan untuk ${konflik.nama} (${konflik.tarikh_bertolak} hingga ${konflik.tarikh_kembali}). Pilih kenderaan lain atau tarikh lain.`,
+                konflik: konflik
+            });
+        }
         
         await db.prepare(`
             UPDATE requests 
