@@ -848,7 +848,8 @@ app.get('/api/admin/notifications/status', requireAdmin, async (req, res) => {
                     provider: notifications.getEmailProvider(), // 'brevo' (API HTTP) atau 'smtp'
                     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
                     port: process.env.EMAIL_PORT || '587',
-                    user: process.env.EMAIL_USER || ''
+                    user: process.env.EMAIL_USER || '',
+                    from: process.env.EMAIL_FROM || process.env.EMAIL_USER || '' // pengirim sebenar (Brevo)
                 },
                 sms: {
                     configured: false,

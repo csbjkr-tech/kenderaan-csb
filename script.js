@@ -341,7 +341,7 @@ async function loadNotificationsData() {
         notifConfigBadge('notifEmailConfig', d.config.email.configured, '✅ Dikonfigurasi', '❌ Tidak dikonfigurasi');
         const hostEl = document.getElementById('notifEmailHost');
         if (hostEl) hostEl.textContent = d.config.email.provider === 'brevo'
-            ? `Brevo API HTTP (port 443) · pengirim: ${d.config.email.user || 'tiada'} · SMTP disekat di Railway`
+            ? `Brevo API HTTP (port 443) · pengirim: ${d.config.email.from || d.config.email.user || 'tiada'} · SMTP disekat di Railway`
             : `${d.config.email.host}:${d.config.email.port} (${d.config.email.user || 'tiada akaun'})`;
         const hint = document.getElementById('notifConfigHint');
         if (hint) {
