@@ -9,3 +9,6 @@ cloudflared.exe
 start-all.bat
 start-tunnel.bat
 backups/
+
+# Fail kata laluan peribadi - JANGAN pernah commit
+KATA LALUAN ADMIN.txt

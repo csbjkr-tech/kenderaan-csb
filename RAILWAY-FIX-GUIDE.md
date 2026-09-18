@@ -66,5 +66,65 @@ Endpoint ini melakukan ping DB sebenar (`SELECT 1`) sejak commit `7de8cd2`.
 ## ⚠️ Nota Penyelenggaraan
 
 - Jangan padam plugin **Postgres** dalam projek `energetic-dream` — itu kini database production yang sebenar
-- Volume `postgres-volume` menyimpan data — Railway mengekalkannya merentas deploy
-- Kata laluan DB tidak perlu diketahui oleh manusia; reference `${{Postgres.DATABASE_URL}}` mengurusnya secara automatik
+- Volume `postgres-volume` menyimpan data — Railway mengekalkannya merentas deploy- Kata laluan DB tidak perlu diketahui oleh manusia; reference `${{Postgres.DATABASE_URL}}` mengurusnya secara automatik
+
+---
+
+## 📧 Audit Ke-3 (2026-09-18): Emel di Railway — Port SMTP Disekat & Penyelesaiannya
+
+**Gejala:** butang **Uji Emel** di production tergantung ~45 saat tanpa jawapan; selepas itu pula gagal
+`ENETUNREACH` / `ETIMEDOUT` walaupun kredensial Gmail betul.
+
+### Punca Berlapis (didiagnosis berperingkat)
+
+1. **Tiada timeout SMTP** — nodemailer menunggu sambungan selamanya apabila rangkaian menyekat;
+   request API tergantung (tidak ada jawapan 45+ saat).
+2. **Percubaan IPv6** — DNS Gmail memulangkan alamat IPv6 (`2a00:1450:...`); kontainer Railway
+   **tiada rangkaian IPv6** → `ENETUNREACH` serta-merta.
+3. **Penyekatan port SMTP oleh Railway** (polisi platform anti-spam) — selepas dua isu di atas
+   dibaiki, sambungan TCP ke Gmail masih tersekat. Bukti dari DALAM kontainer
+   (`railway ssh` → probe node `net.connect`):
+
+   | Sasaran dari kontainer Railway | Keputusan |
+   |---|---|
+   | `smtp.gmail.com:587` (SMTP) | ❌ `ETIMEDOUT` — **disekat** |
+   | `smtp.gmail.com:465` (SMTPS) | ❌ `ETIMEDOUT` — **disekat** |
+   | HTTPS `:443` | ✅ `200` — terbuka |
+
+   **Kesimpulan:** penghantaran SMTP terus dari Railway **tidak mungkin** — ini bukan masalah kod.
+
+### Pembaikan Yang Di-push
+
+| Commit | Pembaikan | Detail |
+|---|---|---|
+| `42e4baf` | **Timeout SMTP** (`notifications.js`) | `connectionTimeout: 10s` (boleh atur melalui `EMAIL_CONNECT_TIMEOUT`), `greetingTimeout: 10s`, `socketTimeout: 15s` → request gagal **pantas ~10 saat** dengan mesej jelas, bukan tergantung selamanya |
+| `9da9f7e` | **IPv4-first DNS** (`server.js`) | `dns.setDefaultResultOrder('ipv4first')` di atas fail → tiada lagi `ENETUNREACH` IPv6 |
+
+Selepas kedua-duanya: ralat berubah daripada *hang* → `ETIMEDOUT` pantas yang **menunjukkan dengan
+tepat** penyekatan port (inilah yang membawa kepada diagnosis #3).
+
+### Penyelesaian Production: API HTTP Emel (port 443 yang terbuka)
+
+Guna penyedia emel dengan **API HTTP** dan `API_KEY` dalam variables Railway — contoh pilihan:
+
+| Penyedia | Percuma | Cara guna |
+|---|---|---|
+| **Brevo** (dahulunya Sendinblue) | 300 emel/hari | `POST https://api.brevo.com/v3/smtp/email` dengan header `api-key` |
+| **Resend** | 100 emel/hari | `POST https://api.resend.com/emails` dengan `Authorization: Bearer` |
+
+Langkah: daftar akaun → sahkan domain/pengirim → simpan kunci sebagai `BREVO_API_KEY` (atau
+`RESEND_API_KEY`) dalam Railway variables → integrasi dalam `notifications.js` sebagai provider
+HTTP selari dengan SMTP. **Lokal tidak terjejas** — sambungan SMTP dari mesin sendiri ke Gmail
+berfungsi (terbukti: ralat `534/535` daripada Gmail bermakna pakej sampai; cuma perlu
+**App Password 16 aksara**, bukan kata laluan akaun).
+
+### Nota Berkaitan (2026-09-18)
+
+- **Sesi admin kini kekal merentas deploy** (2026-09-18): `ADMIN_SESSION_SECRET` tetap telah diset dalam
+   Railway variables — token tidak lagi terbatal setiap redeploy (dibuktikan: token yang diterima
+   *sebelum* redeploy masih sah `200` *selepas* redeploy kedua). Lokal juga ada rahsia tetap sendiri
+   dalam `.env`; kunci didokumenkan dalam `.env.example` (jangan pernah commit nilai sebenar).
+- **Rate limiting login** (commit `3b331cb`): 5 cubaan/akaun & 20 cubaan/IP setiap 15 minit → `429`
+   dengan header `Retry-After`. Ujian brute-force boleh "membakar" kuota IP sendiri buat sementara.
+- Status semasa konfigurasi semak dalam Panel Admin → tab **📢 Notifikasi** (badge ✅/❌ + log gagal
+   dengan sebab sebenar).

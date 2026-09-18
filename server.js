@@ -1,3 +1,5 @@
+// Muat .env (lokal sahaja — di Railway tiada fail .env, variables datang dari platform)
+require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
@@ -11,7 +13,7 @@ const notifications = require('./notifications');
 dns.setDefaultResultOrder('ipv4first');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = Number(process.env.PORT) > 0 ? Number(process.env.PORT) : 8080; // tolak PORT=0/negatif yang rosak dari env mesin
 
 // ===== AUTH HELPERS (token HMAC + hash kata laluan) =====
 const SESSION_SECRET = process.env.ADMIN_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
