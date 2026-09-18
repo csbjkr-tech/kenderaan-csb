@@ -107,7 +107,7 @@ Status: completed (Selesai)
 
 ```
 ├── server.js              # API server + PostgreSQL + endpoints
-├── notifications.js       # Modul notifikasi email/SMS
+├── notifications.js       # Modul notifikasi emel (Brevo API / SMTP)
 ├── index.html             # Halaman utama (pilihan portal)
 ├── admin.html             # Panel admin
 ├── user.html              # Portal pengguna
